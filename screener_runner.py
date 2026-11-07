@@ -29,7 +29,7 @@ APP_FILE = "latest_app.json"
 # поля, які потрібні додатку (таблиця + графік)
 KEEP = ["symbol", "dir", "status", "rank", "score", "price", "zone_low", "zone_high", "entry", "stop", "target",
         "target_type", "rr", "dist", "fib", "fib_ok", "fvg", "sweep", "volume", "vol_conf", "atr_pct", "knife",
-        "flags", "bos_time", "bos_bars_ago", "struct", "against", "chart", "zone_t", "tf_ms"]
+        "flags", "bos_time", "bos_bars_ago", "struct", "against", "chart", "zone_t", "tf_ms", "zone_type"]
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tg.py поруч

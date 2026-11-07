@@ -6,7 +6,8 @@ SMC-скринер v1: шукає на Binance (USDT-пари, 4h) кандид�
   2) ордерблок на початку імпульсу, що дав BOS, з імбалансом (FVG) в імпульсі;
   3) ціна наближається до зони або в ній (перший дотик);
   4) вхід від середини зони, стоп за межею зони, ціль на найближчому свінгу;
-  5) R:R не менше заданого (за замовчуванням 3).
+  5) R:R не менше заданого (за замовчуванням 3);
+  6) v2.6: брейкер-блоки — пробитий ордерблок протилежного напрямку, якщо пробій дав BOS (вимкнути: --no-breakers).
 
 Це інструмент для економії часу: він показує КАНДИДАТІВ для ручної перевірки, а не сигнали.
 Не є фінансовою порадою.
@@ -180,6 +181,44 @@ def build_zone(c, ev):
         if d == -1 and c[k + 1]["h"] < c[k - 1]["l"]:
             fvgs.append((c[k + 1]["h"], c[k - 1]["l"], k))
     return {"ob": ob, "origin": o, "zl": zl, "zh": zh, "fvgs": fvgs}
+
+
+def find_breakers(c, events, d, cfg):
+    """Брейкер-блоки для напрямку d (v2.6). Брейкер = ордерблок протилежного напрямку (з попередньої серії BOS),
+    який ціна пробила закриттям свічки, і цей пробій дав BOS у напрямку d (на свічці пробою або за кілька свічок).
+    Далі зона працює як звичайна зона входу в напрямку d: перший ретест, свіжість від пробою, ті самі стоп/ціль/R:R.
+    Повертає [(ev, z)] у форматі, сумісному з build_zone/count_visits: ev["idx"] = свічка пробою."""
+    i = len(events) - 1
+    while i >= 0 and events[i]["dir"] == d:
+        i -= 1
+    old = []
+    while i >= 0 and events[i]["dir"] == -d and len(old) < cfg["events"]:
+        old.append(events[i])
+        i -= 1
+    d_events = [e for e in events if e["dir"] == d]
+    look = cfg.get("breaker_bos_bars", 10)
+    out = []
+    for oe in old:
+        zo = build_zone(c, oe)
+        zl, zh = zo["zl"], zo["zh"]
+        k_br = next((k for k in range(oe["idx"] + 1, len(c)) if (c[k]["c"] < zl if d == -1 else c[k]["c"] > zh)), None)
+        if k_br is None:
+            continue
+        bos = next((e for e in d_events if k_br <= e["idx"] <= k_br + look), None)
+        if bos is None:
+            continue
+        rng = range(zo["ob"], k_br + 1)
+        o = max(rng, key=lambda k: c[k]["h"]) if d == -1 else min(rng, key=lambda k: c[k]["l"])
+        fvgs = []
+        for k in range(o + 1, k_br):
+            if d == 1 and c[k + 1]["l"] > c[k - 1]["h"]:
+                fvgs.append((c[k - 1]["h"], c[k + 1]["l"], k))
+            if d == -1 and c[k + 1]["h"] < c[k - 1]["l"]:
+                fvgs.append((c[k + 1]["h"], c[k - 1]["l"], k))
+        ev = {"idx": k_br, "dir": d, "level_idx": o, "level": c[o]["h"] if d == -1 else c[o]["l"],
+              "breaker": True, "old_idx": oe["idx"], "bos_idx": bos["idx"]}
+        out.append((ev, {"ob": zo["ob"], "origin": o, "zl": zl, "zh": zh, "fvgs": fvgs, "breaker": True}))
+    return out
 
 
 def count_visits(c, ev, z):
@@ -390,13 +429,16 @@ def analyze_symbol(symbol, candles, px, cfg):
         run.append(ev)
     run = run[:cfg["events"]]
     last_i = len(c) - 1
+    cands = [(ev, None) for ev in run]
+    if cfg.get("breakers", True):
+        cands += find_breakers(c, events, last_dir, cfg)
     out = []
-    for ev in run:
+    for ev, zb in cands:
         d = ev["dir"]
         if last_i - ev["idx"] > cfg["max_age"] or ev["idx"] - ev["level_idx"] > cfg["max_leg"]:
             continue
-        mark("2 BOS свіжий, імпульс не задовгий")
-        z = build_zone(c, ev)
+        mark("2 BOS свіжий, імпульс не задовгий" if zb is None else "2b брейкер: пробій свіжий")
+        z = zb or build_zone(c, ev)
         if cfg.get("need_fvg", False) and not z["fvgs"]:
             continue
         mark("3 імбаланс (вимагається лише з --need-fvg)")
@@ -469,6 +511,9 @@ def analyze_symbol(symbol, candles, px, cfg):
         vol = volume_analysis(c, ev, z, sweep, cfg) if cfg.get("volume", True) else None
         flags = []
         mid_passed = live_touch and ((px > entry) if d == -1 else (px < entry))
+        if zb is not None:
+            flags.append(f"брейкер: колишній {'бичачий' if d == -1 else 'ведмежий'} ордерблок, пробитий "
+                         f"{dt.datetime.fromtimestamp(c[ev['idx']]['t'] / 1000).strftime('%d.%m %H:%M')}")
         if against:
             flags.append("ПРОТИ структури 4h (немає HH+HL / LH+LL у напрямку)")
         if mid_passed:
@@ -510,7 +555,7 @@ def analyze_symbol(symbol, candles, px, cfg):
             "atr_pct": round(volat["atr_pct"], 2), "knife": volat["knife"],
             "bos_bars_ago": last_i - ev["idx"],
             "bos_time": dt.datetime.fromtimestamp(c[ev["idx"]]["t"] / 1000).strftime("%d.%m %H:%M"),
-            "struct": struct, "against": against,
+            "struct": struct, "against": against, "zone_type": "брейкер" if zb is not None else "OB",
         })
         if against and tmode == "strict":
             cfg.setdefault("rejects", []).append(item)  # лише для логу: у список не потрапляє
@@ -619,7 +664,7 @@ def alert_new(rows, seen_path):
     with open(seen_path, "w", encoding="utf-8") as f:
         json.dump(now_keys, f)
     for r, kind in new:
-        line = (f"{kind}: {r['symbol']} {r['dir']} | бали {r['score']} | {r['status']} | вхід {fmt(r['entry'])} стоп {fmt(r['stop'])} "
+        line = (f"{kind}: {r['symbol']} {r['dir']}{' БРЕЙКЕР' if r.get('zone_type') == 'брейкер' else ''} | бали {r['score']} | {r['status']} | вхід {fmt(r['entry'])} стоп {fmt(r['stop'])} "
                 f"ціль {fmt(r['target'])} R:R {r['rr']:.1f}" + (f" | {r['sweep'].upper()}" if r["sweep"] else "") + (f" | ОБСЯГ: {r['volume']}" if r["volume"] != "-" else "") + (" | УВАГА: " + "; ".join(r["flags"]) if r["flags"] else ""))
         print("  >>> " + line)
         notify("SMC-скринер", line, "zone" if kind == "ЦІНА В ЗОНІ" else "new",
@@ -662,7 +707,7 @@ def save_csv(rows, path):
 def save_json(rows, path, stamp):
     """Компактний JSON усіх кандидатів (без важких даних графіка) для журналу чи подальшої автоматизації."""
     keep = ["symbol", "dir", "status", "score", "price", "zone_low", "zone_high", "entry", "stop", "target",
-            "target_type", "rr", "dist", "fib", "fib_ok", "fvg", "sweep", "volume", "vol_conf", "atr_pct", "knife", "flags", "bos_time", "struct", "against"]
+            "target_type", "rr", "dist", "fib", "fib_ok", "fvg", "sweep", "volume", "vol_conf", "atr_pct", "knife", "flags", "bos_time", "struct", "against", "zone_type"]
     data = {"generated": stamp, "market": "futures" if MKT["futures"] else "spot",
             "count": len(rows), "candidates": [{k: r.get(k) for k in keep} for r in rows]}
     with open(path, "w", encoding="utf-8") as f:
@@ -1001,6 +1046,24 @@ def selftest():
     mir2 = [{"t": x["t"], "o": 300 - x["o"], "h": 300 - x["l"], "l": 300 - x["h"], "c": 300 - x["c"], "closed": True} for x in ce]
     rd = analyze_symbol("ETH", mir2, 300 - pe, dict(wide, trend="strict"))
     check("дзеркало: шорт проти висхідної структури відсіяно", rd == [])
+    # брейкер (v2.6): бичачий OB пробито вниз із BOS, ціна повертається знизу до тієї самої зони -> шорт від брейкера
+    cbk = _mk(zig([100, 110, 104, 120, 113, 128, 100, 108, 92, 104]))
+    wide_bk = dict(wide, approach=10.0)
+    rbk = analyze_symbol("BRK", cbk, cbk[-1]["c"], dict(wide_bk, trend="strict"))
+    check("брейкер: шорт від пробитого бичачого ордерблока, з позначкою",
+          len(rbk) == 1 and rbk[0]["zone_type"] == "брейкер" and rbk[0]["dir"] == "Short"
+          and any(f.startswith("брейкер") for f in rbk[0]["flags"]), str([(x["zone_type"], x["dir"]) for x in rbk]))
+    if rbk:
+        check("брейкер: стоп над зоною, ціль під входом, R:R пораховано", rbk[0]["stop"] > rbk[0]["zone_high"]
+              and rbk[0]["target"] < rbk[0]["entry"] and rbk[0]["rr"] >= 1)
+    rnb = analyze_symbol("BRK", cbk, cbk[-1]["c"], dict(wide_bk, trend="strict", breakers=False))
+    check("--no-breakers: брейкера немає", all(x["zone_type"] != "брейкер" for x in rnb))
+    cbk2 = _mk(zig([100, 110, 104, 120, 113, 128, 100, 108, 92, 104, 118]))
+    rbk2 = analyze_symbol("BRK", cbk2, cbk2[-1]["c"], dict(wide_bk, trend="bos"))
+    check("брейкер: ціна закрилась над зоною — шорт-брейкер зламано, не показується",
+          not any(x["zone_type"] == "брейкер" and x["dir"] == "Short" for x in rbk2 + cfg.get("rejects", [])),
+          str([(x["zone_type"], x["dir"]) for x in rbk2]))
+
     # нормальний висхідний тренд має проходити у strict
     cu = _mk(zig([80, 90, 85, 100, 94, 110, 104, 120, 114, 130, 120]))
     ru = analyze_symbol("UP", cu, cu[-1]["c"], dict(wide, trend="strict"))
@@ -1174,7 +1237,7 @@ def live_touches(live_rows, prices, fired):
 
 def fire_live(a, r, px, seen_path, stamp):
     """Живий алерт: ціна щойно зайшла в зону. Оновлює seen.json, щоб наступний повний скан не продублював сповіщення."""
-    line = (f"ЦІНА В ЗОНІ (наживо): {r['symbol']} {r['dir']} | ціна {fmt(px)} | зона {fmt(r['zone_low'])}-{fmt(r['zone_high'])} | "
+    line = (f"ЦІНА В ЗОНІ (наживо): {r['symbol']} {r['dir']}{' БРЕЙКЕР' if r.get('zone_type') == 'брейкер' else ''} | ціна {fmt(px)} | зона {fmt(r['zone_low'])}-{fmt(r['zone_high'])} | "
             f"вхід {fmt(r['entry'])} стоп {fmt(r['stop'])} ціль {fmt(r['target'])} R:R {r['rr']:.1f} | бали {r['score']}"
             + (" | УВАГА: " + "; ".join(r["flags"]) if r["flags"] else "") + " | перевір 1h")
     print("  >>> " + line)
@@ -1302,6 +1365,7 @@ def main():
                    help="як визначати тренд: strict = структура 4h (HH+HL / LH+LL) має збігатись з напрямком (за замовч.); "
                         "bos = лише останній BOS (старий режим); flag = показувати, але з позначкою «проти структури»")
     p.add_argument("--trend-swing", type=int, default=5, help="розмір свінга для структури тренду, свічок з кожного боку (5)")
+    p.add_argument("--no-breakers", action="store_true", help="не шукати брейкер-блоки (пробиті ордерблоки, що стали зоною в інший бік)")
     p.add_argument("--only-sweep", action="store_true", help="показувати лише сетапи, де перед BOS був свіп ліквідності")
     p.add_argument("--min-score", type=float, default=None, help="показувати лише кандидатів із балами >= N (за замовч. без фільтра)")
     p.add_argument("--no-knife", action="store_true", help="вимкнути детектор «ножів» (різких свічок)")
@@ -1346,7 +1410,7 @@ def main():
         MKT.clear(); MKT.update(SPOT)
     cfg = {"knife": not a.no_knife, "knife_mult": a.knife_mult, "knife_look": a.knife_look, "max_atr": a.max_atr, "min_score": a.min_score, "volume": not a.no_volume, "vol_imp": a.vol_imp, "vol_pb": a.vol_pb, "charts": a.charts, "only_sweep": a.only_sweep, "trend": a.trend, "trend_swing": a.trend_swing, "wick": a.stop_wick, "wick_pct": a.wick_pct, "deep": a.deep, "min_stop_atr": a.min_stop_atr, "need_fvg": a.need_fvg, "swing": a.swing, "events": a.events, "max_age": a.max_age, "max_leg": a.max_leg, "max_zone": a.max_zone,
            "approach": a.approach, "buffer": a.buffer, "min_rr": a.min_rr, "allow_retests": a.allow_retests,
-           "fib_lo": a.fib_lo, "fib_hi": a.fib_hi}
+           "fib_lo": a.fib_lo, "fib_hi": a.fib_hi, "breakers": not a.no_breakers}
     if a.debug:
         cfg["stats"] = {}
 

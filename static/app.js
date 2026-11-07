@@ -249,7 +249,7 @@ function renderTable() {
     return `<tr class="s${r.rank}" data-i="${r.idx}">
       <td class="num">${r.idx + 1}</td>
       <td><a class="sym" href="${tvLink(r.symbol)}" target="_blank" rel="noopener" title="Відкрити в TradingView">${esc(r.symbol)}</a></td>
-      <td class="dir-${esc(r.dir)}">${esc(r.dir)}</td>
+      <td class="dir-${esc(r.dir)}">${esc(r.dir)}${r.zone_type === "брейкер" ? ' <span class="tag amber" title="брейкер-блок: пробитий ордерблок протилежного напрямку">брейкер</span>' : ""}</td>
       <td>${esc(r.status)}</td>
       <td class="act${r.rank}">${esc(actionText(r))}</td>
       <td class="num"><b>${esc(r.score)}</b></td>
@@ -323,7 +323,7 @@ function renderCharts() {
     const extra = (r.sweep ? " | " + esc(r.sweep) : "") + (r.volume && r.volume !== "-" ? " | обсяг: " + esc(r.volume) : "");
     const warn = (r.flags || []).length ? ` | <b class="warnings">${esc(r.flags.join("; "))}</b>` : "";
     return `<div class="card s${r.rank}" id="c${r.idx}">
-      <div class="hd"><b>${r.idx + 1}. ${esc(r.symbol)}</b> <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>
+      <div class="hd"><b>${r.idx + 1}. ${esc(r.symbol)}</b> <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.zone_type === "брейкер" ? ' <span class="tag amber">брейкер</span>' : ""}
         | ${esc(r.status)} | вхід ${fmt(r.entry)} · стоп ${fmt(r.stop)} · ціль ${fmt(r.target)} | <b>R:R ${fix(r.rr, 1)}</b>${extra}${warn}
         | <a href="${tvLink(r.symbol)}" target="_blank" rel="noopener">TradingView</a></div>
       <div class="chart" id="ch${r.idx}">${r.chart && r.chart.length > 2 ? "" : '<div class="nochart">Графіка немає: дані свічок з\'являться після скану, запущеного з додатка.</div>'}</div>
@@ -444,6 +444,7 @@ async function loadSettings() {
   fillForm(r.settings);
   $("#cmdPreview").textContent = r.command || "";
   renderEnv(r.env);
+  loadGit();
 }
 function fillForm(s) {
   const f = $("#setForm");
@@ -532,6 +533,38 @@ $("#btnShutdown").addEventListener("click", async () => {
   document.body.innerHTML = `<div class="closed"><h2>SMC App закрито</h2>
     <p>${r.screener_running ? "Скринер працює далі у фоні: алерти приходитимуть. " : ""}Щоб відкрити знову — «SMC App» у Dock / Launchpad
     (або <code>python3 app.py</code> у папці додатка). Це вікно можна закрити.</p></div>`;
+});
+
+// ---------------------------------------------------------------- GitHub
+const gitTime = iso => iso ? iso.replace("T", " ").slice(0, 16) : "";
+async function loadGit() {
+  let g;
+  try { g = await api("/api/git/status"); } catch (e) { return; }
+  const el = $("#gitState");
+  let h;
+  if (!g.repo) h = `<span class="no">✗</span> Папку ще не підключено до git. У Терміналі: <code>cd ~/smc_app && git init -b main</code>, далі — як у першому пуші.`;
+  else if (!g.remote) h = `<span class="no">✗</span> Немає адреси репозиторію. У Терміналі: <code>git remote add origin https://github.com/ЛОГІН/smc-app.git</code>`;
+  else {
+    const link = g.web ? `<a href="${esc(g.web)}" target="_blank" rel="noopener">${esc(g.web.replace("https://github.com/", ""))}</a>` : esc(g.remote);
+    const bad = g.ok === false && g.error;
+    h = `<span class="${bad ? "no" : "ok"}">${bad ? "✗" : "✓"}</span> ${link} · гілка ${esc(g.branch || "?")}`
+      + (g.last_push ? ` · останній пуш ${esc(gitTime(g.last_push))}` : "")
+      + (g.last_commit ? ` · коміт <code>${esc(g.last_commit.hash)}</code> ${esc(gitTime(g.last_commit.at))}` : "")
+      + (g.ahead ? ` · <b>не запушено комітів: ${g.ahead}</b>` : "")
+      + (g.dirty && g.dirty.length ? ` · змінених файлів: ${g.dirty.length}${g.enabled ? " (збережу за хвилину-дві)" : ""}` : "")
+      + (bad ? `<br><span class="warnc">${esc(g.error)}</span>` : "")
+      + (g.enabled ? "" : " — <b>автозбереження вимкнено</b>");
+  }
+  el.innerHTML = h;
+  $("#gitPush").disabled = !(g.repo && g.remote);
+}
+$("#gitPush").addEventListener("click", async () => {
+  const m = $("#gitMsg");
+  m.textContent = "Пушу…"; m.style.color = "";
+  const g = await api("/api/git/push", {});
+  m.textContent = g.ok ? "Збережено в GitHub ✓" : "Не вдалося — див. вище";
+  m.style.color = g.ok ? "var(--green)" : "var(--red)";
+  loadGit();
 });
 
 // ---------------------------------------------------------------- Telegram

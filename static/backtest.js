@@ -275,7 +275,7 @@ async function loadTrades(id) {
   if (!id) loadOos();
 }
 
-function renderSummary(sel, sm, title) {
+function renderBtSummary(sel, sm, title) {
   const box = $(sel);
   if (!sm) { box.innerHTML = ""; return; }
   box.className = "bt-summary tone-" + sm.tone;
@@ -286,7 +286,7 @@ function renderSummary(sel, sm, title) {
 function renderSlices(r) {
   $("#btSlRun").textContent = r ? `прогін №${r.id} · ${r.filters_text} · закритих угод ${r.metrics.a.n || 0}` : "";
   if (!r || !r.slices) return;
-  renderSummary("#btSlSummary", r.slices_summary, "Що показують розрізи");
+  renderBtSummary("#btSlSummary", r.slices_summary, "Що показують розрізи");
   const miss = r.slices.some(s => s.missing);
   $("#btSlBox").innerHTML = `<div class="table-wrap bt-tbl"><table><thead><tr><th>Група</th><th>Угод</th><th>Виграшних</th>
       <th>Сер. R: до цілі</th><th>Сума R</th><th>PF</th><th>Сер. R: за стратегією</th></tr></thead><tbody>`
@@ -338,7 +338,7 @@ function renderOos() {
     row("Макс. просадка, R", x => num(x.max_dd, 1)),
     row("Найдовша серія збитків", x => x.max_streak),
   ].join("");
-  renderSummary("#btOosSummary", r.summary, "Висновок перевірки поза вибіркою");
+  renderBtSummary("#btOosSummary", r.summary, "Висновок перевірки поза вибіркою");
   $("#btOosNote").innerHTML = log.length > 1 ? `<b>Увага:</b> поза вибіркою відкривали ${log.length} рази — кожне нове відкриття знецінює перевірку.` : "";
 }
 $("#btOosOpen").addEventListener("click", async () => {
@@ -369,6 +369,7 @@ function fillTrForm(p) {
   f.min_score.value = p.min_score == null ? "" : String(p.min_score);
   f.max_rr.value = p.max_rr == null ? "" : p.max_rr;
   f.dirs.value = p.dirs || "both";
+  f.zones.value = p.zones || "all";
   f.no_knife.checked = !!p.no_knife; f.no_tight.checked = !!p.no_tight;
 }
 
@@ -400,7 +401,7 @@ function renderTrades() {
       <td class="num">${x.n ? num(x.winrate, 1) + "%" : "–"}</td><td class="num">${x.n ? R(x.avg) : "–"}</td><td class="num">${x.n ? R(x.sum) : "–"}</td></tr>`; }).join("");
   $("#btTrMonths").innerHTML = m.months.map(x => `<tr><td>${esc(x.month)}</td><td class="num">${x.n}</td><td class="num">${x.wins}</td>
       <td class="num">${R(x.a)}</td><td class="num">${R(x.b)}</td></tr>`).join("");
-  renderSummary("#btTrSummary", r.summary, "Висновок простими словами");
+  renderBtSummary("#btTrSummary", r.summary, "Висновок простими словами");
   renderTrList();
   renderSlices(r);
   renderOosRules();
@@ -431,7 +432,7 @@ $("#btTrForm").addEventListener("submit", async ev => {
   const params = { expiry_h: +f.expiry_h.value || 0, maker: +f.maker.value, taker: +f.taker.value,
     cancel_on_target: f.cancel_on_target.checked, one_per_symbol: f.one_per_symbol.checked,
     min_score: f.min_score.value === "" ? null : +f.min_score.value, max_rr: f.max_rr.value === "" ? null : +f.max_rr.value,
-    dirs: f.dirs.value, no_knife: f.no_knife.checked, no_tight: f.no_tight.checked };
+    dirs: f.dirs.value, zones: f.zones.value, no_knife: f.no_knife.checked, no_tight: f.no_tight.checked };
   let r;
   try { r = await api("/api/backtest/trades/run", { params }); } catch (e) { r = { error: "немає зв'язку з додатком" }; }
   btn.disabled = false;

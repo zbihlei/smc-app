@@ -31,8 +31,8 @@ MONTH_MS = int(30.4375 * 86400_000)
 DEFAULTS = {"expiry_h": 0, "cancel_on_target": True, "one_per_symbol": True, "maker": 0.02, "taker": 0.05,
             "dev_months": 8, "be_at": 3.0, "part_at": 4.0, "part_share": 0.5,
             # фільтри сигналів (етап 4): None / False = без фільтра
-            "min_score": None, "max_rr": None, "no_knife": False, "no_tight": False, "dirs": "both"}
-FILTER_KEYS = ("min_score", "max_rr", "no_knife", "no_tight", "dirs")
+            "min_score": None, "max_rr": None, "no_knife": False, "no_tight": False, "dirs": "both", "zones": "all"}
+FILTER_KEYS = ("min_score", "max_rr", "no_knife", "no_tight", "dirs", "zones")
 CANCEL_TXT = {"mid_passed": "середина зони вже пройдена на момент сигналу",
               "zone_close": "4h закрилась за зоною до входу",
               "target_first": "ціна дійшла до цілі без входу",
@@ -71,6 +71,7 @@ def clean_params(p):
     except (TypeError, ValueError):
         raise ValueError("мін. бали й макс. R:R — числа")
     out["dirs"] = p.get("dirs") if p.get("dirs") in ("Long", "Short") else "both"
+    out["zones"] = p.get("zones") if p.get("zones") in ("OB", "брейкер") else "all"
     return out
 
 
@@ -90,6 +91,8 @@ def passes(lv, d, P):
         return False
     if P["dirs"] != "both" and d != P["dirs"]:
         return False
+    if P.get("zones", "all") != "all" and (lv.get("zone_type") or "OB") != P["zones"]:
+        return False
     return True
 
 
@@ -105,6 +108,8 @@ def filters_text(P):
         out.append("без тісного стопу")
     if P.get("dirs") in ("Long", "Short"):
         out.append(f"лише {P['dirs']}")
+    if P.get("zones") in ("OB", "брейкер"):
+        out.append("лише ордерблоки" if P["zones"] == "OB" else "лише брейкери")
     return ", ".join(out) or "без фільтрів"
 
 
@@ -119,7 +124,7 @@ def _sim_event(e, lv, c1, t1, P):
             "zone_low": zl, "zone_high": zh, "rr": lv["rr"], "score": lv.get("score"), "knife": bool(lv.get("knife")),
             "flags": lv.get("flags") or [], "status_at_signal": lv.get("status"), "sweep": lv.get("sweep"),
             "fib_ok": lv.get("fib_ok"), "vol_conf": lv.get("vol_conf"), "target_type": lv.get("target_type"),
-            "atr_pct": lv.get("atr_pct")}
+            "atr_pct": lv.get("atr_pct"), "zone_type": lv.get("zone_type") or "OB"}
     risk = abs(E - S)
     if risk <= 0 or (d == 1 and not (S < E < TG)) or (d == -1 and not (TG < E < S)):
         return dict(base, outcome="cancel", reason="bad_levels")
@@ -362,7 +367,7 @@ class TradeStore:
 
 TRADE_KEEP = ("symbol", "dir", "signal_ms", "fill_ms", "exit_ms", "outcome", "reason", "state", "entry", "stop", "target", "rr",
               "r_a", "r_b", "exit_a", "exit_b", "mfe", "mae", "hours", "hours_to_fill", "score", "knife", "risk_pct", "fee_r",
-              "flags", "sweep", "fib_ok", "vol_conf", "target_type", "atr_pct", "status_at_signal")
+              "flags", "sweep", "fib_ok", "vol_conf", "target_type", "atr_pct", "status_at_signal", "zone_type")
 
 
 def run(data_dir, sig_store, sig_run_id, params, window="dev", base_id=None):
@@ -400,6 +405,7 @@ def _band(x, edges, labels):
 
 
 SLICES = [
+    ("Тип зони", lambda t: t.get("zone_type") or "OB", ["OB", "брейкер"]),
     ("Бали скринера", lambda t: None if t.get("score") is None else ("≤ −1" if t["score"] <= -1 else "≥ 3" if t["score"] >= 3 else str(t["score"])),
      ["≤ −1", "0", "1", "2", "≥ 3"]),
     ("R:R сигналу", lambda t: _band(t.get("rr"), (3.5, 4.5, 6), ("3–3,5", "3,5–4,5", "4,5–6", "> 6")), ["3–3,5", "3,5–4,5", "4,5–6", "> 6"]),
@@ -548,7 +554,7 @@ def summary(res, risk_pct=1.0):
             pts.append("Найбільша різниця між групами: " + "; ".join(
                 f"{name} — «{hi['group']}» {_r(hi['avg_a'])} ({hi['n']}) проти «{lo['group']}» {_r(lo['avg_a'])} ({lo['n']})"
                 for _, name, hi, lo in cand[:3]) + ". Це підказки для фільтрів, а не доведені правила.")
-    nf = sum(1 for k in FILTER_KEYS if P.get(k) not in (None, False, "both"))
+    nf = sum(1 for k in FILTER_KEYS if P.get(k) not in (None, False, "both", "all"))
     if nf >= 3:
         pts.append(f"Увімкнено {nf} фільтри: що більше фільтрів, то легше випадково «підігнати» правила під минуле.")
     # що далі
@@ -568,6 +574,7 @@ def summary(res, risk_pct=1.0):
 
 # ============================================================================ висновок по розрізах
 SLICE_HINTS = {   # назва розрізу -> (фільтр у кроці 3 або None, логіка зі стратегії або None)
+    "Тип зони": ("«Тип зони»", "за стратегією брейкер допускається, але це окремий тип входу — його варто оцінювати окремо від ордерблоків"),
     "Бали скринера": ("«Мін. бали»", "бали — це зведена якість сигналу: підтвердження обсягом, свіп, Фібо мінус ризики"),
     "R:R сигналу": ("«Макс. R:R»", "за стратегією, далекі цілі часто не доходять"),
     "Напрям": ("«Напрям»", None),

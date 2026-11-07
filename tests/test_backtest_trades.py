@@ -152,6 +152,9 @@ Pf = BT.clean_params({"min_score": 2})
 check("фільтр «мін. бали»", not BT.passes(lv, "Long", Pf) and BT.passes(lv, "Long", BT.clean_params({"min_score": 1})))
 check("фільтри «макс. R:R», «без тісного стопу», «лише Short»", not BT.passes(lv, "Long", BT.clean_params({"max_rr": 3.5}))
       and not BT.passes(lv, "Long", BT.clean_params({"no_tight": True})) and not BT.passes(lv, "Long", BT.clean_params({"dirs": "Short"})))
+check("фільтр «тип зони»: брейкер/ордерблок (старі сигнали без типу = ордерблок)",
+      not BT.passes(lv, "Long", BT.clean_params({"zones": "брейкер"})) and BT.passes(lv, "Long", BT.clean_params({"zones": "OB"}))
+      and BT.passes(dict(lv, zone_type="брейкер"), "Long", BT.clean_params({"zones": "брейкер"})))
 check("текст фільтрів", BT.filters_text(BT.clean_params({"min_score": 1, "no_knife": True})) == "бали ≥ 1, без «ножа»")
 sl = BT.slices(res["trades"])
 check("розрізи: у кожній ознаці сума угод по групах = закритим угодам",

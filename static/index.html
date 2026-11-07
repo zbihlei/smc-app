@@ -307,6 +307,7 @@
             <option value="2">≥ 2</option><option value="3">≥ 3</option></select></label>
           <label>Макс. R:R <input name="max_rr" type="number" min="3" max="50" step="0.5" placeholder="без"></label>
           <label>Напрям <select name="dirs"><option value="both">обидва</option><option value="Long">лише Long</option><option value="Short">лише Short</option></select></label>
+          <label>Тип зони <select name="zones"><option value="all">усі</option><option value="OB">лише ордерблоки</option><option value="брейкер">лише брейкери</option></select></label>
           <label class="chk"><input name="no_knife" type="checkbox"> без «ножа»</label>
           <label class="chk"><input name="no_tight" type="checkbox"> без тісного стопу</label>
         </div>
@@ -385,6 +386,7 @@
         <label class="ck"><input name="tv_button" type="checkbox"> Кнопка «Відкрити в TradingView» у вікні</label>
         <label class="ck"><input name="voice" type="checkbox"> Голос (--voice)</label>
         <label class="ck"><input name="stop_wick" type="checkbox"> Стоп за гнотом поруч із зоною (--stop-wick)</label>
+        <label class="ck"><input name="breakers" type="checkbox"> Шукати брейкер-блоки (пробиті ордерблоки; вимкнено = --no-breakers)</label>
         <label class="ck"><input name="caffeinate" type="checkbox"> Не давати Mac засинати (caffeinate)</label>
       </fieldset>
       <fieldset class="wide">
@@ -405,6 +407,17 @@
         </div>
         <p class="muted small">Токен бота береться зі змінної <code>SMC_TG_TOKEN</code> у <code>~/.zshrc</code> — додаток його не зберігає.
           Після підключення чи вимкнення перезапусти скринер («Стоп» → «Старт»), щоб він підхопив зміну.</p>
+      </fieldset>
+      <fieldset class="wide">
+        <legend>GitHub</legend>
+        <div id="gitState" class="tgstate"></div>
+        <label class="ck"><input name="git_autopush" type="checkbox"> Автоматично зберігати зміни коду в GitHub (коміт і пуш щохвилини, якщо є зміни)</label>
+        <div class="tg-actions">
+          <button class="btn small" type="button" id="gitPush">Запушити зараз</button>
+          <span id="gitMsg" class="muted small"></span>
+        </div>
+        <p class="muted small">У GitHub іде лише код. Журнал, кеш бектесту, налаштування, логи й бекапи лишаються на Mac
+          (список — у файлі <code>.gitignore</code>). Вхід — той самий, що в Терміналі (токен у Keychain).</p>
       </fieldset>
       <fieldset class="wide">
         <legend>Журнал</legend>
