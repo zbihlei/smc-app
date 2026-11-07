@@ -7,6 +7,7 @@ SMC-скринер v1: шукає на Binance (USDT-пари, 4h) кандид�
   3) ціна наближається до зони або в ній (перший дотик);
   4) вхід від середини зони, стоп за межею зони, ціль на найближчому свінгу;
   5) R:R не менше заданого (за замовчуванням 3);
+  7) v2.7: допуск входу --entry-tol N (% висоти зони): ціна не завжди доходить рівно до середини блока;
   6) v2.6: брейкер-блоки — пробитий ордерблок протилежного напрямку, якщо пробій дав BOS (вимкнути: --no-breakers).
 
 Це інструмент для економії часу: він показує КАНДИДАТІВ для ручної перевірки, а не сигнали.
@@ -443,8 +444,11 @@ def analyze_symbol(symbol, candles, px, cfg):
             continue
         mark("3 імбаланс (вимагається лише з --need-fvg)")
         zl, zh = z["zl"], z["zh"]
-        entry = (zl + zh) / 2
-        if (zh - zl) / entry * 100 > cfg["max_zone"]:
+        mid = (zl + zh) / 2
+        # v2.7: допуск входу — лімітка зсунута від середини до краю, з якого приходить ціна, на N% висоти зони
+        tol = max(0.0, min(50.0, float(cfg.get("entry_tol", 0) or 0)))
+        entry = mid + d * tol / 100 * (zh - zl)
+        if (zh - zl) / mid * 100 > cfg["max_zone"]:
             continue
         mark("4 зона не надто висока")
         visits, in_visit_last, broken = count_visits(c, ev, z)
@@ -498,7 +502,10 @@ def analyze_symbol(symbol, candles, px, cfg):
         if risk <= 0:
             continue
         rr = abs(target - entry) / risk
-        if rr < cfg["min_rr"]:
+        # R:R для відбору сигналу рахується від середини зони (сигнал валідний, як і без допуску);
+        # rr — від фактичної лімітки з допуском (показується в таблиці й алертах). --rr-at-limit — суворо від лімітки.
+        rr_mid = abs(target - mid) / abs(mid - stop) if abs(mid - stop) > 0 else 0.0
+        if (rr if cfg.get("rr_at_limit") else rr_mid) < cfg["min_rr"]:
             continue
         mark("9 R:R достатній")
         fib = fib_retracement(c, ev, z, entry)
@@ -517,7 +524,8 @@ def analyze_symbol(symbol, candles, px, cfg):
         if against:
             flags.append("ПРОТИ структури 4h (немає HH+HL / LH+LL у напрямку)")
         if mid_passed:
-            flags.append("середина зони вже пройдена, шукай 1h-уточнення")
+            flags.append("середина зони вже пройдена, шукай 1h-уточнення" if not tol else
+                         f"рівень лімітки (середина + допуск {tol:g}%) вже пройдено, шукай 1h-уточнення")
         if retr_now is not None and retr_now > cfg.get("deep", 0.85):
             flags.append(f"глибокий відкат {retr_now * 100:.0f}% імпульсу")
         if wick_used:
@@ -549,7 +557,7 @@ def analyze_symbol(symbol, candles, px, cfg):
                     "zone_t": c[z["ob"]]["t"], "tf_ms": (c[-1]["t"] - c[-2]["t"]),
                     "sweep": sweep, "flags": flags, "retr_now": retr_now, "mid_passed": mid_passed, "wick_used": wick_used,
             "symbol": symbol, "dir": "Long" if d == 1 else "Short", "status": status, "rank": rank,
-            "price": px, "zone_low": zl, "zone_high": zh, "entry": entry, "stop": stop, "target": target,
+            "price": px, "zone_low": zl, "zone_high": zh, "entry": entry, "entry_mid": mid, "entry_tol": tol, "rr_mid": rr_mid, "stop": stop, "target": target,
             "target_type": ttype, "rr": rr, "dist": dist, "fvg": len(z["fvgs"]),
             "fib": fib, "fib_ok": fib_ok,
             "atr_pct": round(volat["atr_pct"], 2), "knife": volat["knife"],
@@ -707,7 +715,7 @@ def save_csv(rows, path):
 def save_json(rows, path, stamp):
     """Компактний JSON усіх кандидатів (без важких даних графіка) для журналу чи подальшої автоматизації."""
     keep = ["symbol", "dir", "status", "score", "price", "zone_low", "zone_high", "entry", "stop", "target",
-            "target_type", "rr", "dist", "fib", "fib_ok", "fvg", "sweep", "volume", "vol_conf", "atr_pct", "knife", "flags", "bos_time", "struct", "against", "zone_type"]
+            "target_type", "rr", "dist", "fib", "fib_ok", "fvg", "sweep", "volume", "vol_conf", "atr_pct", "knife", "flags", "bos_time", "struct", "against", "zone_type", "entry_mid", "entry_tol", "rr_mid"]
     data = {"generated": stamp, "market": "futures" if MKT["futures"] else "spot",
             "count": len(rows), "candidates": [{k: r.get(k) for k in keep} for r in rows]}
     with open(path, "w", encoding="utf-8") as f:
@@ -957,6 +965,13 @@ def selftest():
         check("стоп нижче зони", r["stop"] < 98.7, fmt(r["stop"]))
         check("ціль = найближчий неторкнутий максимум (≈107.3)", abs(r["target"] - 107.3) < 1e-6, fmt(r["target"]))
         check("R:R ≥ 3", r["rr"] >= 3, f"{r['rr']:.2f}")
+        rt = analyze_symbol("DEMOUSDT", c, 100.4, dict(cfg, entry_tol=25))
+        check("допуск входу 25%: лімітка 99.75 (середина 99.4 + 0.25×1.4), R:R менший, стоп і ціль ті самі",
+              len(rt) == 1 and abs(rt[0]["entry"] - 99.75) < 1e-6 and rt[0]["rr"] < r["rr"] and abs(rt[0]["stop"] - r["stop"]) < 1e-9
+              and abs(rt[0]["entry_mid"] - 99.4) < 1e-6, fmt(rt[0]["entry"]) if rt else "нема")
+        rlim = analyze_symbol("DEMOUSDT", c, 100.4, dict(cfg, entry_tol=50, min_rr=r["rr"] - 0.01))
+        rlim2 = analyze_symbol("DEMOUSDT", c, 100.4, dict(cfg, entry_tol=50, min_rr=r["rr"] - 0.01, rr_at_limit=True))
+        check("R:R для відбору — від середини (сигнал лишається), з --rr-at-limit — від лімітки (відсіяно)", len(rlim) == 1 and rlim2 == [])
 
     res2 = analyze_symbol("DEMOUSDT", c, 99.9, cfg)
     check("ціна в зоні, 1-й дотик", len(res2) == 1 and res2[0]["status"] == "у зоні (1-й дотик)", str(res2[0]["status"]) if res2 else "нема")
@@ -983,6 +998,8 @@ def selftest():
     if res7:
         check("шорт: стоп вище зони", res7[0]["stop"] > res7[0]["zone_high"])
         check("шорт: ціль нижче входу", res7[0]["target"] < res7[0]["entry"])
+        r7t = analyze_symbol("DEMOUSDT", mir, 200 - 100.4, dict(cfg, entry_tol=25))
+        check("шорт: допуск зсуває лімітку вниз (ціна приходить знизу)", len(r7t) == 1 and r7t[0]["entry"] < r7t[0]["entry_mid"])
 
     # фільтр тренду: низхідна структура (LH+LL) з відскоком, що зламав останній LH (як ETH). Лонг не має проходити.
     def zig(pivots, seg=8):
@@ -1365,6 +1382,9 @@ def main():
                    help="як визначати тренд: strict = структура 4h (HH+HL / LH+LL) має збігатись з напрямком (за замовч.); "
                         "bos = лише останній BOS (старий режим); flag = показувати, але з позначкою «проти структури»")
     p.add_argument("--trend-swing", type=int, default=5, help="розмір свінга для структури тренду, свічок з кожного боку (5)")
+    p.add_argument("--entry-tol", type=float, default=0.0, metavar="N",
+                   help="допуск входу: лімітка на N%% висоти зони ближче до краю, з якого приходить ціна (0 = рівно середина; 50 = край)")
+    p.add_argument("--rr-at-limit", action="store_true", help="мін. R:R перевіряти від лімітки з допуском (за замовч. — від середини зони)")
     p.add_argument("--no-breakers", action="store_true", help="не шукати брейкер-блоки (пробиті ордерблоки, що стали зоною в інший бік)")
     p.add_argument("--only-sweep", action="store_true", help="показувати лише сетапи, де перед BOS був свіп ліквідності")
     p.add_argument("--min-score", type=float, default=None, help="показувати лише кандидатів із балами >= N (за замовч. без фільтра)")
@@ -1410,7 +1430,8 @@ def main():
         MKT.clear(); MKT.update(SPOT)
     cfg = {"knife": not a.no_knife, "knife_mult": a.knife_mult, "knife_look": a.knife_look, "max_atr": a.max_atr, "min_score": a.min_score, "volume": not a.no_volume, "vol_imp": a.vol_imp, "vol_pb": a.vol_pb, "charts": a.charts, "only_sweep": a.only_sweep, "trend": a.trend, "trend_swing": a.trend_swing, "wick": a.stop_wick, "wick_pct": a.wick_pct, "deep": a.deep, "min_stop_atr": a.min_stop_atr, "need_fvg": a.need_fvg, "swing": a.swing, "events": a.events, "max_age": a.max_age, "max_leg": a.max_leg, "max_zone": a.max_zone,
            "approach": a.approach, "buffer": a.buffer, "min_rr": a.min_rr, "allow_retests": a.allow_retests,
-           "fib_lo": a.fib_lo, "fib_hi": a.fib_hi, "breakers": not a.no_breakers}
+           "fib_lo": a.fib_lo, "fib_hi": a.fib_hi, "breakers": not a.no_breakers,
+           "entry_tol": max(0.0, min(50.0, a.entry_tol)), "rr_at_limit": a.rr_at_limit}
     if a.debug:
         cfg["stats"] = {}
 

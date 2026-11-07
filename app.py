@@ -37,7 +37,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -55,6 +55,7 @@ DEFAULTS = {
     "top": 100,
     "price_check": 15,
     "min_stop_atr": 0.6,
+    "entry_tol": 25,              # допуск входу, % висоти зони (скринер v2.7+: --entry-tol)
     "trend": "strict",
     "popup": True,
     "voice": True,
@@ -73,7 +74,7 @@ DEFAULTS = {
 # межі для числових полів: (мін, макс, тип)
 LIMITS = {
     "watch": (1, 240, float), "approach": (0.1, 50, float), "top": (1, 500, int),
-    "price_check": (0, 600, float), "min_stop_atr": (0, 5, float),
+    "price_check": (0, 600, float), "min_stop_atr": (0, 5, float), "entry_tol": (0, 50, float),
 }
 TRENDS = ("strict", "flag", "bos")
 FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers")
@@ -163,6 +164,8 @@ def build_command(s):
             cmd.append(opt)
     if not s.get("breakers", True):
         cmd.append("--no-breakers")
+    if float(s.get("entry_tol") or 0) > 0:
+        cmd += ["--entry-tol", num(float(s["entry_tol"]))]
     cmd += shlex.split(s["extra_args"])
     caff = shutil.which("caffeinate") if s["caffeinate"] else None
     if caff:

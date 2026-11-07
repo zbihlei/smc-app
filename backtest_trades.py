@@ -31,7 +31,9 @@ MONTH_MS = int(30.4375 * 86400_000)
 DEFAULTS = {"expiry_h": 0, "cancel_on_target": True, "one_per_symbol": True, "maker": 0.02, "taker": 0.05,
             "dev_months": 8, "be_at": 3.0, "part_at": 4.0, "part_share": 0.5,
             # фільтри сигналів (етап 4): None / False = без фільтра
-            "min_score": None, "max_rr": None, "no_knife": False, "no_tight": False, "dirs": "both", "zones": "all"}
+            "min_score": None, "max_rr": None, "no_knife": False, "no_tight": False, "dirs": "both", "zones": "all",
+            # допуск входу, % висоти зони: None = як у скринері (рівень лімітки з сигналу), число — перерахувати від середини
+            "entry_tol": None, "min_rr": 3.0, "rr_at_limit": False}
 FILTER_KEYS = ("min_score", "max_rr", "no_knife", "no_tight", "dirs", "zones")
 CANCEL_TXT = {"mid_passed": "середина зони вже пройдена на момент сигналу",
               "zone_close": "4h закрилась за зоною до входу",
@@ -60,7 +62,7 @@ def clean_params(p):
         out["taker"] = max(0.0, min(0.5, float(p.get("taker", out["taker"]))))
     except (TypeError, ValueError):
         raise ValueError("термін і комісії — числа")
-    for k in ("cancel_on_target", "one_per_symbol", "no_knife", "no_tight"):
+    for k in ("cancel_on_target", "one_per_symbol", "no_knife", "no_tight", "rr_at_limit"):
         if k in p:
             out[k] = bool(p[k])
     try:
@@ -72,6 +74,11 @@ def clean_params(p):
         raise ValueError("мін. бали й макс. R:R — числа")
     out["dirs"] = p.get("dirs") if p.get("dirs") in ("Long", "Short") else "both"
     out["zones"] = p.get("zones") if p.get("zones") in ("OB", "брейкер") else "all"
+    try:
+        et = p.get("entry_tol")
+        out["entry_tol"] = None if et in (None, "") else max(0.0, min(50.0, float(et)))
+    except (TypeError, ValueError):
+        raise ValueError("допуск входу — число від 0 до 50")
     return out
 
 
@@ -110,6 +117,10 @@ def filters_text(P):
         out.append(f"лише {P['dirs']}")
     if P.get("zones") in ("OB", "брейкер"):
         out.append("лише ордерблоки" if P["zones"] == "OB" else "лише брейкери")
+    if P.get("entry_tol") is not None:
+        out.append(f"допуск входу {P['entry_tol']:g}%")
+    if P.get("rr_at_limit"):
+        out.append("R:R ≥ 3 від лімітки")
     return ", ".join(out) or "без фільтрів"
 
 
@@ -119,6 +130,8 @@ def _sim_event(e, lv, c1, t1, P):
     d = 1 if e["dir"] == "Long" else -1
     E, S, TG = lv["entry"], lv["stop"], lv["target"]
     zl, zh = lv["zone_low"], lv["zone_high"]
+    if P.get("entry_tol") is not None:      # свій допуск у прогоні: лімітка від середини на N% висоти зони до краю
+        E = (zl + zh) / 2 + d * P["entry_tol"] / 100 * (zh - zl)
     T = e["first_list_ms"]
     base = {"symbol": e["symbol"], "dir": e["dir"], "signal_ms": T, "entry": E, "stop": S, "target": TG,
             "zone_low": zl, "zone_high": zh, "rr": lv["rr"], "score": lv.get("score"), "knife": bool(lv.get("knife")),
@@ -133,6 +146,10 @@ def _sim_event(e, lv, c1, t1, P):
         return dict(base, outcome="cancel", reason="mid_passed")
     risk_pct = risk / E * 100
     rr = abs(TG - E) / risk
+    mid = (zl + zh) / 2
+    rr_check = rr if P.get("rr_at_limit") else (abs(TG - mid) / abs(mid - S) if abs(mid - S) > 0 else 0.0)
+    if rr_check < P.get("min_rr", 3.0) - 1e-9:   # як у скринері: за замовч. R:R для відбору — від середини зони
+        return dict(base, entry=E, outcome="cancel", reason="rr_low")
     i = bisect_left(t1, T)
     exp_ms = T + P["expiry_h"] * H1 if P["expiry_h"] else None
     fill_i = None
@@ -533,8 +550,8 @@ def summary(res, risk_pct=1.0):
     sig = m.get("signals") or 0
     tf = next((c["n"] for c in m.get("cancels", []) if c["reason"] == "target_first"), 0)
     if sig and tf / sig >= 0.2:
-        pts.append(f"{round(tf / sig * 100)}% сигналів ціна дійшла до цілі, так і не торкнувшись середини зони: лімітка від середини "
-                   "їх пропускає. Це не збиток, але й не заробіток.")
+        pts.append(f"{round(tf / sig * 100)}% сигналів ціна дійшла до цілі, так і не дійшовши до рівня лімітки: такі угоди "
+                   "пропущено. Це не збиток, але й не заробіток; більший допуск входу ловить частину з них, але зменшує R:R.")
     if m.get("rr_median") and m["rr_median"] >= 5 and n >= 30:
         mfe3 = next((x["share"] for x in m.get("mfe", []) if x["k"] == 3), None)
         pts.append(f"Цілі здебільшого далекі (медіана R:R {_n(m['rr_median'])}), а до 3R доходить лише "

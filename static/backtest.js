@@ -393,6 +393,8 @@ function fillTrForm(p) {
   f.max_rr.value = p.max_rr == null ? "" : p.max_rr;
   f.dirs.value = p.dirs || "both";
   f.zones.value = p.zones || "all";
+  f.entry_tol.value = p.entry_tol == null ? "" : p.entry_tol;
+  f.rr_at_limit.checked = !!p.rr_at_limit;
   f.no_knife.checked = !!p.no_knife; f.no_tight.checked = !!p.no_tight;
 }
 
@@ -468,7 +470,7 @@ $("#btTrForm").addEventListener("submit", async ev => {
   const params = { expiry_h: +f.expiry_h.value || 0, maker: +f.maker.value, taker: +f.taker.value,
     cancel_on_target: f.cancel_on_target.checked, one_per_symbol: f.one_per_symbol.checked,
     min_score: f.min_score.value === "" ? null : +f.min_score.value, max_rr: f.max_rr.value === "" ? null : +f.max_rr.value,
-    dirs: f.dirs.value, zones: f.zones.value, no_knife: f.no_knife.checked, no_tight: f.no_tight.checked };
+    dirs: f.dirs.value, zones: f.zones.value, entry_tol: f.entry_tol.value === "" ? null : +f.entry_tol.value, rr_at_limit: f.rr_at_limit.checked, no_knife: f.no_knife.checked, no_tight: f.no_tight.checked };
   let r;
   try { r = await api("/api/backtest/trades/run", { params }); } catch (e) { r = { error: "немає зв'язку з додатком" }; }
   btn.disabled = false;

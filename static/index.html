@@ -252,13 +252,15 @@
           <label class="chk"><input name="no_tight" type="checkbox"> без тісного стопу</label>
           <details class="bt-adv"><summary class="muted small">Умови прогону</summary>
             <div class="bt-form">
+              <label title="Порожньо — як у скринері (з «Налаштувань»). Число — перерахувати лімітку від середини на N% висоти зони до краю.">Допуск входу, % зони <input name="entry_tol" type="number" min="0" max="50" step="5" placeholder="як у скринері"></label>
               <label>Термін лімітки, год <input name="expiry_h" type="number" min="0" max="2160" step="1" value="0" title="0 — без терміну"></label>
               <label>Maker, % <input name="maker" type="number" min="0" max="0.5" step="0.005" value="0.02"></label>
               <label>Taker, % <input name="taker" type="number" min="0" max="0.5" step="0.005" value="0.05"></label>
               <label class="chk"><input name="cancel_on_target" type="checkbox" checked> знімати, якщо ціль без входу</label>
               <label class="chk"><input name="one_per_symbol" type="checkbox" checked> одна угода на монету</label>
+              <label class="chk" title="За замовчуванням R:R ≥ 3 перевіряється від середини зони (як у скринері); тут — від лімітки з допуском"><input name="rr_at_limit" type="checkbox"> R:R ≥ 3 від лімітки (суворо)</label>
             </div>
-            <p class="muted small">Лімітка від середини зони з рівнями сигналу; шлях ціни по 1h (стоп і ціль в одній свічці = стоп); комісії без фандінгу;
+            <p class="muted small">Лімітка від середини зони (з допуском входу) з рівнями сигналу; шлях ціни по 1h (стоп і ціль в одній свічці = стоп); комісії без фандінгу;
               рахуються перші 8 місяців — останні 4 відкладено для перевірки поза вибіркою.</p>
           </details>
         </form>
@@ -365,6 +367,7 @@
         <label>Відстань «підходу», % (--approach) <input name="approach" type="number" step="0.1" min="0.1"></label>
         <label>Перевірка ціни, с (0 = вимкнути) <input name="price_check" type="number" step="1" min="0"></label>
         <label>Тісний стоп: поріг × середньої свічки <input name="min_stop_atr" type="number" step="0.1" min="0"></label>
+        <label title="Ціна не завжди доходить рівно до середини блока: лімітка ставиться на N% висоти зони ближче до краю, з якого приходить ціна. 0 = середина, 50 = край.">Допуск входу, % висоти зони (--entry-tol) <input name="entry_tol" type="number" step="5" min="0" max="50"></label>
         <label>Тренд 4h
           <select name="trend">
             <option value="strict">strict — лише за структурою HH+HL / LH+LL</option>

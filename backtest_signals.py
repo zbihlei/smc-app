@@ -37,7 +37,7 @@ H4 = BD.TF_MS["4h"]
 WINDOW = 499            # закритих 4h-свічок у вікні (живий скан: --limit 500, остання ще не закрита)
 SNAP_KEYS = ("status", "rank", "price", "zone_low", "zone_high", "entry", "stop", "target", "target_type", "rr", "dist",
              "score", "vol_conf", "volume", "sweep", "flags", "fib", "fib_ok", "atr_pct", "knife", "bos_bars_ago",
-             "bos_time", "struct", "against", "zone_t", "retr_now", "mid_passed", "wick_used", "fvg", "zone_type")
+             "bos_time", "struct", "against", "zone_t", "retr_now", "mid_passed", "wick_used", "fvg", "zone_type", "entry_mid", "entry_tol")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS sig_runs (
