@@ -1,0 +1,11 @@
+# Особисті дані й робочі файли — лише на Mac (журнал, кеш бектесту, налаштування, логи)
+data/
+results/
+.claude_backups/
+.claude_write_test
+__pycache__/
+*.pyc
+.DS_Store
+*.log
+# містить справжній токен Google Таблиці
+apps_script/Code.gs

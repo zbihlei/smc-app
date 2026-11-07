@@ -1,0 +1,550 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMC App</title>
+<link rel="icon" type="image/png" href="/favicon.png">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">SMC<span>App</span></div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="screener" role="tab">Скринер</button>
+    <button class="tab" data-tab="journal" role="tab">Журнал</button>
+    <button class="tab" data-tab="summary" role="tab">Підсумок</button>
+    <button class="tab" data-tab="strategy" role="tab">Стратегія</button>
+    <button class="tab" data-tab="history" role="tab">Історія</button>
+    <button class="tab" data-tab="backtest" role="tab">Бектест</button>
+    <button class="tab" data-tab="settings" role="tab">Налаштування</button>
+  </nav>
+  <div class="run">
+    <span id="pill" class="pill off"><i></i><b id="pillText">Зупинено</b></span>
+    <button id="btnRun" class="btn primary" disabled>Старт</button>
+  </div>
+</header>
+
+<main>
+  <!-- ======================= СКРИНЕР ======================= -->
+  <section id="tab-screener" class="panel active">
+    <div class="statusline" id="statusLine">Завантаження…</div>
+    <div id="msg" class="msg hidden"></div>
+    <div id="zoneAlert" class="zone-alert hidden"></div>
+    <div id="staleNote" class="note-box hidden"></div>
+
+    <div class="toolbar">
+      <div class="chips" id="filterChips">
+        <button class="chip on" data-f="all">Усі <span id="cAll">0</span></button>
+        <button class="chip" data-f="zone">У зоні <span id="cZone">0</span></button>
+        <button class="chip" data-f="approach">Підхід <span id="cApproach">0</span></button>
+      </div>
+      <div class="chips" id="dirChips">
+        <button class="chip on" data-d="all">Long + Short</button>
+        <button class="chip" data-d="Long">Long</button>
+        <button class="chip" data-d="Short">Short</button>
+      </div>
+      <input id="search" class="search" type="search" placeholder="Пошук монети" autocomplete="off">
+      <span class="spacer"></span>
+      <span id="dataStamp" class="muted"></span>
+    </div>
+
+    <div class="table-wrap">
+      <table id="tbl">
+        <thead><tr>
+          <th>№</th><th>Символ</th><th>Напрям</th><th>Статус</th><th>Дія</th><th title="Сума підтверджень для сортування, не ймовірність">Бали</th>
+          <th>Ціна</th><th>Зона</th><th>Вхід</th><th>Стоп</th><th>Ціль</th><th>R:R</th><th>Відст.%</th>
+          <th>Fib</th><th>Свіп</th><th>Обсяг</th><th>BOS</th><th>Увага</th><th></th>
+        </tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div id="empty" class="empty hidden"></div>
+    </div>
+
+    <h3 class="sec">Графіки <span class="muted" id="chartsCount"></span></h3>
+    <p class="legend">
+      <span class="lg zone"></span>зона входу (фіолетова пунктирна — середина)
+      <span class="lg risk"></span>ризик до стопа
+      <span class="lg rew"></span>шлях до цілі
+      <span class="lg path"></span>сценарій-ілюстрація, не прогноз. Колесо миші — масштаб, перетягування — рух.
+    </p>
+    <div id="charts" class="grid"></div>
+
+    <details id="logBox" class="logbox">
+      <summary>Лог скринера <span class="muted" id="logPath"></span></summary>
+      <pre id="log"></pre>
+    </details>
+    <p class="foot">Кандидати для ручної перевірки, а не сигнали. Не фінансова порада.
+      Графіки: <a href="https://www.tradingview.com/" target="_blank" rel="noopener">TradingView</a> Lightweight Charts™.</p>
+  </section>
+
+  <!-- ======================= ЖУРНАЛ ======================= -->
+  <section id="tab-journal" class="panel">
+    <div class="j-head">
+      <div class="j-stats" id="jStats"></div>
+      <div class="j-actions">
+        <button class="btn primary" id="jAddSignal" type="button">+ Угода зі скринера</button>
+        <button class="btn" id="jAddManual" type="button">+ Вручну</button>
+        <button class="btn" id="jLinkBtn" type="button" title="Знайти в логу скринера сигнали для угод без прив'язки">Сигнали для угод <span class="badge hidden" id="jLinkCount"></span></button>
+        <button class="btn" id="jImport" type="button" title="Підтягнути угоди з аркуша «Журнал» у Google Таблиці">Імпорт з таблиці</button>
+        <a class="btn" id="jCsv" href="/api/journal/export.csv" title="Завантажити журнал як CSV">CSV</a>
+      </div>
+    </div>
+    <div id="jSheet" class="sheetline muted">Перевіряю зв'язок з Google Таблицею…</div>
+    <div id="jMsg" class="msg hidden"></div>
+    <div id="lnkBox" class="card lnkbox hidden"></div>
+    <div class="table-wrap jwrap">
+      <table id="jTbl">
+        <thead><tr>
+          <th>№</th><th>Дата</th><th>Інструмент</th><th>Напрям</th><th>Вхід</th><th>Стоп</th><th>Ціль</th><th>R:R</th>
+          <th>За прав.</th><th>Результат, R</th><th>Накоп.</th><th>Просадка</th><th>Серія</th><th>Тип зони</th>
+          <th>CHoCH 1h</th><th>MFE</th><th>Скринер</th><th title="Чи записано в Google Таблицю">Табл.</th><th>Нотатка</th>
+        </tr></thead>
+        <tbody id="jBody"></tbody>
+      </table>
+      <div id="jEmpty" class="empty hidden">
+        <p>У журналі ще немає угод.</p>
+        <button class="btn primary" id="jImport2" type="button">Імпортувати угоди з Google Таблиці</button>
+      </div>
+    </div>
+    <details id="bkBox" class="logbox bkbox">
+      <summary>Резервні копії журналу <span class="muted" id="bkSum"></span></summary>
+      <div class="bk-in">
+        <div class="bk-tools">
+          <button class="btn" type="button" id="bkNow">Зробити копію зараз</button>
+          <span class="muted small" id="bkWhere"></span>
+        </div>
+        <p class="muted small">Автоматично: <b>актуальна</b> копія після кожної зміни, <b>щоденна</b> — стан на початок дня
+          (до першої зміни; зберігаються 30 днів). <b>Ручні</b> копії не видаляються. Перед відновленням поточний стан
+          теж зберігається, тож відновлення можна скасувати.</p>
+        <table class="bktbl"><thead><tr><th>Копія</th><th>Час</th><th>Угод</th><th>Накопичено</th><th>Розмір</th><th></th></tr></thead>
+          <tbody id="bkBody"></tbody></table>
+      </div>
+    </details>
+    <p class="foot" id="jFoot"></p>
+  </section>
+
+  <!-- ======================= ПІДСУМОК ======================= -->
+  <section id="tab-summary" class="panel">
+    <div class="toolbar">
+      <div class="chips" id="sPeriod">
+        <button class="chip on" data-p="all">Усі</button>
+        <button class="chip" data-p="90">90 днів</button>
+        <button class="chip" data-p="30">30 днів</button>
+        <button class="chip" data-p="7">7 днів</button>
+        <button class="chip" data-p="month">Цей місяць</button>
+      </div>
+      <span class="muted" id="sNote"></span>
+    </div>
+    <div id="sKpi" class="kpis"></div>
+    <div class="card eqcard">
+      <div class="hd"><b>Накопичений R</b> <span class="muted small">по угодах за номером; крапка = результат угоди, сіра зона = просадка від піку</span></div>
+      <div id="sEq" class="eq"></div>
+    </div>
+
+    <h3 class="sec">Гіпотези</h3>
+    <p class="legend">Порівняння середнього R між групами. Висновок з'являється, коли в кожній групі хоча б 3 угоди;
+      до 50–100 угод це орієнтири, а не доказ.</p>
+    <div id="sHyp" class="hyps"></div>
+
+    <h3 class="sec">У розрізі</h3>
+    <div id="sGroups" class="sgrid"></div>
+
+    <h3 class="sec">MFE: чи виправдані далекі цілі</h3>
+    <div id="sMfe" class="card"></div>
+
+    <h3 class="sec">Відхилення від рівнів скринера</h3>
+    <div id="sSig" class="card"></div>
+    <p class="foot">Рахуються лише закриті угоди (з результатом). Цифри збігаються з аркушем «Підсумок» Google Таблиці
+      (ті самі формули), плюс розрізи й гіпотези, яких там немає.</p>
+  </section>
+
+  <!-- ======================= СТРАТЕГІЯ ======================= -->
+  <section id="tab-strategy" class="panel">
+    <div class="toolbar">
+      <b id="stTitle" class="st-title"></b>
+      <span class="muted small" id="stMeta"></span>
+      <span class="spacer"></span>
+      <button class="btn" type="button" id="stHistBtn">Історія версій</button>
+      <button class="btn primary" type="button" id="stEdit">Редагувати</button>
+      <button class="btn" type="button" id="stCancel" hidden>Скасувати</button>
+      <button class="btn primary" type="button" id="stSave" hidden>Зберегти</button>
+    </div>
+    <div id="stMsg" class="msg hidden"></div>
+    <div id="stHist" class="card st-hist hidden"></div>
+    <div class="st-wrap">
+      <nav id="stToc" class="st-toc"></nav>
+      <article id="stView" class="card st-doc"></article>
+      <div id="stEditor" class="st-editor hidden">
+        <textarea id="stText" spellcheck="false"></textarea>
+        <p class="muted small">Формат Markdown: <code># Заголовок</code>, <code>## Розділ</code>, <code>- пункт</code> (вкладений — 2 пробіли на початку),
+          <code>1. пункт</code>, <code>**жирний**</code>, <code>*курсив*</code>, <code>[текст](https://посилання)</code>.
+          Перед кожним збереженням попередня версія йде в «Історію версій».</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= ІСТОРІЯ ======================= -->
+  <section id="tab-history" class="panel">
+    <div class="toolbar">
+      <div class="chips" id="hComp"></div>
+      <input id="hSearch" class="search" type="search" placeholder="Пошук: монета, №, слово" autocomplete="off">
+      <span class="spacer"></span>
+      <span class="muted small" id="hMeta"></span>
+      <button class="btn primary" type="button" id="hAdd">+ Запис</button>
+    </div>
+    <p class="legend">Що змінювали в скринері, стратегії, журналі й додатку — і <b>чому</b>: яка угода чи спостереження до цього привели.
+      «≈» — дата приблизна. Клік по <b>№</b> угоди відкриває її в журналі.</p>
+    <div id="hMsg" class="msg hidden"></div>
+    <form id="hForm" class="card hform hidden" autocomplete="off" novalidate>
+      <div class="hf-hd"><b id="hFormTitle">Новий запис</b><button type="button" class="x" data-hclose aria-label="Закрити">×</button></div>
+      <div class="hf-grid">
+        <label>Дата <input name="date" type="date"></label>
+        <label class="ck hf-ck"><input name="approx" type="checkbox"> дата приблизна (≈)</label>
+        <label>Компонент <select name="component"></select></label>
+        <label>Версія <input name="version" type="text" placeholder="напр. v2.6 або v0.6"></label>
+        <label class="wide">Назва <input name="title" type="text" placeholder="Що змінилось, коротко"></label>
+        <label class="wide">Що змінилось <textarea name="what" rows="3"></textarea></label>
+        <label class="wide">Чому (угода чи спостереження) <textarea name="why" rows="2"></textarea></label>
+        <label class="wide">Результат (якщо вже відомий) <textarea name="result" rows="2"></textarea></label>
+        <label>Номери угод <input name="trades" type="text" placeholder="напр. 16, 21"></label>
+      </div>
+      <div class="hf-act">
+        <button class="btn danger" type="button" id="hDelete" hidden>Видалити запис</button>
+        <span class="spacer"></span>
+        <button class="btn" type="button" data-hclose>Скасувати</button>
+        <button class="btn primary" type="submit">Зберегти</button>
+      </div>
+      <div id="hErr" class="msg err hidden"></div>
+    </form>
+    <div id="hList" class="timeline"></div>
+  </section>
+
+  <!-- ======================= БЕКТЕСТ ======================= -->
+  <section id="tab-backtest" class="panel">
+    <p class="legend">Перевірка правил стратегії на історії Binance USDT-M. Результат бектесту — <b>гіпотеза</b>, яку підтверджують
+      паперові угоди, а не доказ. Етапи: <b>1. Дані</b> → <b>2. Сигнали</b> (replay скринера) → <b>3. Угоди й метрики</b> → <b>4. Розрізи</b> → <b>5. Перевірка поза вибіркою</b>.</p>
+    <div class="card btcard">
+      <div class="bt-hd"><h3>1. Дані: свічки 4h і 1h</h3><span class="muted small" id="btPeriod"></span></div>
+      <div class="bt-form">
+        <label>Період
+          <select id="btMonths"><option value="6">6 місяців</option><option value="12" selected>12 місяців</option><option value="24">24 місяці</option></select>
+        </label>
+        <label>Монет (топ за обсягом, як у скринері) <input id="btTop" type="number" min="5" max="200" value="100"></label>
+        <button class="btn primary" type="button" id="btStart">Завантажити / докачати</button>
+        <button class="btn danger" type="button" id="btStop" hidden>Зупинити</button>
+      </div>
+      <div id="btProg" class="bt-prog hidden">
+        <div class="bar"><i id="btBar"></i></div>
+        <div class="muted small" id="btProgTxt"></div>
+      </div>
+      <div id="btMsg" class="msg hidden"></div>
+      <p class="muted small">Качає твій Mac напряму з Binance і зберігає в <code id="btPath">data/backtest/klines.db</code>.
+        Повторний запуск докачує лише нові свічки. 4h — з «розігрівом» на 500 свічок до початку періоду (як вікно скринера).
+        Список монет — топ «зараз», тож монети, яких рік тому не було в топі або які зникли, у вибірку не потрапили (упередження «вижилих»).</p>
+      <div class="bt-sum" id="btSum"></div>
+      <div class="bt-add">
+        <h4>Додати монети в кеш</h4>
+        <p class="muted small">Для монет поза поточним топом — напр., тих, що бувають у живому топі в будні. Качаються лише вони, за той самий
+          період; далі «Завантажити / докачати» оновлює їх разом з усіма, а «Знайти сигнали» їх враховує.</p>
+        <form class="bt-form" id="btAddForm" autocomplete="off">
+          <label>Монети через кому <input id="btAddSyms" type="text" placeholder="DOT, HBAR, TRX"></label>
+          <button class="btn" type="submit" id="btAddBtn">Додати в кеш</button>
+        </form>
+        <div id="btLogMiss" class="bt-miss"></div>
+      </div>
+      <details class="logbox" id="btTblBox"><summary>Монети в кеші <span class="muted" id="btTblCount"></span></summary>
+        <div class="table-wrap bt-tbl"><table><thead><tr><th>#</th><th>Монета</th><th>4h: з – до (свічок)</th><th>1h: з – до (свічок)</th><th></th></tr></thead>
+          <tbody id="btBody"></tbody></table></div>
+      </details>
+      <details class="logbox" id="btRunsBox"><summary>Запуски завантаження</summary><div id="btRuns" class="bt-runs"></div></details>
+    </div>
+    <div class="card btcard" id="btSigCard">
+      <div class="bt-hd"><h3>2. Сигнали: прохід скринера по історії</h3><span class="muted small" id="btSigPeriod"></span></div>
+      <p class="muted small">Щогодини по історії викликається функція самого скринера (<code>analyze_symbol</code>) з тими ж налаштуваннями,
+        що в «Налаштуваннях». Вона бачить лише закриті 4h-свічки (останні 499) і ціну закриття останньої години — як живий скан.
+        Подія = пара + напрям + зона (як у живих алертах). «Торкнулась» — ціна зайшла в зону всередині години (аналог алерту «наживо»).</p>
+      <div class="bt-form">
+        <button class="btn primary" type="button" id="btSigStart">Знайти сигнали</button>
+        <button class="btn danger" type="button" id="btSigStop" hidden>Зупинити</button>
+        <span class="muted small" id="btSigHint"></span>
+      </div>
+      <div id="btSigProg" class="bt-prog hidden">
+        <div class="bar"><i id="btSigBar"></i></div>
+        <div class="muted small" id="btSigProgTxt"></div>
+      </div>
+      <div id="btSigMsg" class="msg hidden"></div>
+      <div id="btSigRes" class="hidden">
+        <div class="bt-sum" id="btSigSum"></div>
+        <details class="logbox" id="btSigMonthsBox"><summary>По місяцях</summary>
+          <div class="table-wrap bt-tbl"><table class="bt-num"><thead><tr><th>Місяць</th><th>Сигналів</th><th>Торкнулись зони</th><th>Long</th><th>Short</th></tr></thead>
+            <tbody id="btSigMonths"></tbody></table></div>
+        </details>
+        <div class="bt-cmp" id="btCmp"></div>
+        <details class="logbox" id="btSigEvBox"><summary>Сигнали (нові вгорі) <span class="muted" id="btSigEvCount"></span></summary>
+          <div class="table-wrap bt-tbl"><table><thead><tr><th>Поява</th><th>Монета</th><th></th><th>Статус</th><th>Зона</th><th>Вхід · стоп · ціль</th><th>R:R</th><th>Бали</th><th>У зоні</th><th>Год.</th></tr></thead>
+            <tbody id="btSigEv"></tbody></table></div>
+        </details>
+        <details class="logbox" id="btSigParBox"><summary>Налаштування скринера в цьому проході</summary><div id="btSigPar" class="bt-runs"></div></details>
+      </div>
+      <details class="logbox" id="btSigRunsBox"><summary>Запуски пошуку сигналів</summary><div id="btSigRuns" class="bt-runs"></div></details>
+    </div>
+    <div class="card btcard" id="btTrCard">
+      <div class="bt-hd"><h3>3. Угоди й метрики</h3><span class="muted small" id="btTrPeriod"></span></div>
+      <p class="muted small">Кожен сигнал «у списку» → лімітка від середини зони з рівнями сигналу. Скасування до входу — якщо 4h-свічка
+        закрилась за зоною (правило 8). Шлях ціни — по 1h; якщо стоп і ціль в одній свічці, рахуємо <b>стоп</b>. Комісії без фандінгу.
+        Без 1h-уточнення: сигнали, де середина зони вже пройдена, пропускаються. Рахуються лише <b>перші 8 місяців</b> — останні 4 приховано
+        для перевірки поза вибіркою.</p>
+      <form class="bt-form" id="btTrForm" autocomplete="off">
+        <label>Термін лімітки, год <input name="expiry_h" type="number" min="0" max="2160" step="1" value="0" title="0 — без терміну"></label>
+        <label>Maker, % <input name="maker" type="number" min="0" max="0.5" step="0.005" value="0.02"></label>
+        <label>Taker, % <input name="taker" type="number" min="0" max="0.5" step="0.005" value="0.05"></label>
+        <label class="chk"><input name="cancel_on_target" type="checkbox" checked> знімати, якщо ціль без входу</label>
+        <label class="chk"><input name="one_per_symbol" type="checkbox" checked> одна угода на монету</label>
+        <div class="bt-filters">
+          <span class="muted small">Фільтри сигналів:</span>
+          <label>Мін. бали <select name="min_score"><option value="">усі</option><option value="0">≥ 0</option><option value="1">≥ 1</option>
+            <option value="2">≥ 2</option><option value="3">≥ 3</option></select></label>
+          <label>Макс. R:R <input name="max_rr" type="number" min="3" max="50" step="0.5" placeholder="без"></label>
+          <label>Напрям <select name="dirs"><option value="both">обидва</option><option value="Long">лише Long</option><option value="Short">лише Short</option></select></label>
+          <label class="chk"><input name="no_knife" type="checkbox"> без «ножа»</label>
+          <label class="chk"><input name="no_tight" type="checkbox"> без тісного стопу</label>
+        </div>
+        <button class="btn primary" type="submit" id="btTrRun">Прогнати угоди</button>
+      </form>
+      <div id="btTrMsg" class="msg hidden"></div>
+      <div id="btTrRes" class="hidden">
+        <div class="bt-funnel" id="btTrFunnel"></div>
+        <div class="table-wrap bt-tbl"><table class="bt-cmp-tbl"><thead><tr><th></th><th>До цілі або стопа</th><th>За стратегією<br><span class="muted small">3R → беззбиток, 4R → 50%</span></th></tr></thead>
+          <tbody id="btTrVar"></tbody></table></div>
+        <div class="bt-summary" id="btTrSummary"></div>
+        <div class="bt-two">
+          <div><h4>Скільки угод пройшли N R у мій бік (MFE)</h4>
+            <div class="table-wrap"><table><thead><tr><th>≥</th><th>Угод</th><th>З них закрились у мінус</th></tr></thead><tbody id="btTrMfe"></tbody></table></div></div>
+          <div><h4>Long / Short <span class="muted small">(до цілі або стопа)</span></h4>
+            <div class="table-wrap"><table><thead><tr><th></th><th>Угод</th><th>Виграшних</th><th>Сер. R</th><th>Сума R</th></tr></thead><tbody id="btTrSide"></tbody></table></div></div>
+        </div>
+        <details class="logbox" id="btTrMonthsBox"><summary>По місяцях (за датою закриття)</summary>
+          <div class="table-wrap bt-tbl"><table><thead><tr><th>Місяць</th><th>Угод</th><th>Виграшних</th><th>Сума R: до цілі</th><th>Сума R: за стратегією</th></tr></thead>
+            <tbody id="btTrMonths"></tbody></table></div></details>
+        <details class="logbox" id="btTrListBox"><summary>Угоди <span class="muted" id="btTrCount"></span></summary>
+          <div class="bt-form bt-filter"><input id="btTrSearch" type="search" placeholder="Монета"><select id="btTrFilter">
+            <option value="">усі</option><option value="win">у плюс</option><option value="loss">у мінус</option><option value="open">відкриті</option></select></div>
+          <div class="table-wrap bt-tbl"><table><thead><tr><th>Сигнал</th><th>Вхід</th><th>Монета</th><th></th><th>R:R</th><th>Стоп, %</th><th>R: до цілі</th><th>R: стратегія</th><th>MFE</th><th>MAE</th><th>Год.</th></tr></thead>
+            <tbody id="btTrBody"></tbody></table></div></details>
+      </div>
+      <details class="logbox" id="btTrRunsBox"><summary>Прогони угод</summary><div id="btTrRuns" class="bt-runs"></div></details>
+    </div>
+    <div class="card btcard" id="btSlCard">
+      <div class="bt-hd"><h3>4. Розрізи</h3><span class="muted small" id="btSlRun"></span></div>
+      <p class="muted small">Ті самі угоди прогону з кроку 3, розбиті за ознаками сигналу на момент появи в списку. Середній R — з комісіями.
+        Групи з менш ніж 30 угодами — сірим: там легко побачити випадковість. Розрізи — це <b>гіпотези</b>: чим більше ознак перебираємо,
+        тим більше шанс знайти «закономірність», якої немає. Перевірити обраний фільтр можна лише на відкладених 4 місяцях (крок 5).</p>
+      <div class="bt-summary" id="btSlSummary"></div>
+      <div id="btSlBox" class="bt-sl"><p class="muted">Спершу «Прогнати угоди» (крок 3).</p></div>
+    </div>
+    <div class="card btcard" id="btOosCard">
+      <div class="bt-hd"><h3>5. Перевірка поза вибіркою</h3><span class="muted small" id="btOosPeriod"></span></div>
+      <p class="muted small">Останні 4 місяці не брали участі в підборі правил. Обери правила у кроці 3 (фільтри й ведення), прожени угоди,
+        і тоді відкрий для них ці 4 місяці. Чесна перевірка — <b>одна</b>: якщо після відкриття знову підкручувати фільтри й відкривати ще раз,
+        перевірка перетворюється на звичайний підбір. Кожне відкриття записується нижче.</p>
+      <div class="bt-oos-rules" id="btOosRules"></div>
+      <div class="bt-form"><button class="btn primary" type="button" id="btOosOpen" disabled>Відкрити останні 4 місяці для цих правил</button></div>
+      <div id="btOosMsg" class="msg hidden"></div>
+      <div id="btOosRes" class="hidden">
+        <div class="table-wrap bt-tbl"><table class="bt-cmp-tbl"><thead><tr><th></th><th>Розробка (8 міс.)<br><span class="muted small">до цілі · за стратегією</span></th>
+          <th>Поза вибіркою (4 міс.)<br><span class="muted small">до цілі · за стратегією</span></th></tr></thead><tbody id="btOosTbl"></tbody></table></div>
+        <div class="bt-summary" id="btOosSummary"></div>
+        <p class="muted small" id="btOosNote"></p>
+      </div>
+      <details class="logbox" id="btOosLogBox"><summary>Журнал відкриттів <span class="muted" id="btOosCount"></span></summary><div id="btOosLog" class="bt-runs"></div></details>
+    </div>
+  </section>
+
+  <!-- ======================= НАЛАШТУВАННЯ ======================= -->
+  <section id="tab-settings" class="panel">
+    <form id="setForm" class="settings" autocomplete="off">
+      <fieldset>
+        <legend>Скан</legend>
+        <label>Скан кожні, хв <input name="watch" type="number" step="1" min="1"></label>
+        <label>Пар у скані (--top) <input name="top" type="number" step="1" min="1"></label>
+        <label>Відстань «підходу», % (--approach) <input name="approach" type="number" step="0.1" min="0.1"></label>
+        <label>Перевірка ціни, с (0 = вимкнути) <input name="price_check" type="number" step="1" min="0"></label>
+        <label>Тісний стоп: поріг × середньої свічки <input name="min_stop_atr" type="number" step="0.1" min="0"></label>
+        <label>Тренд 4h
+          <select name="trend">
+            <option value="strict">strict — лише за структурою HH+HL / LH+LL</option>
+            <option value="flag">flag — показувати з позначкою «проти»</option>
+            <option value="bos">bos — лише останній BOS (старий)</option>
+          </select>
+        </label>
+      </fieldset>
+      <fieldset>
+        <legend>Сповіщення і стоп</legend>
+        <label class="ck"><input name="popup" type="checkbox"> Спливаюче вікно (--popup)</label>
+        <label class="ck"><input name="tv_button" type="checkbox"> Кнопка «Відкрити в TradingView» у вікні</label>
+        <label class="ck"><input name="voice" type="checkbox"> Голос (--voice)</label>
+        <label class="ck"><input name="stop_wick" type="checkbox"> Стоп за гнотом поруч із зоною (--stop-wick)</label>
+        <label class="ck"><input name="caffeinate" type="checkbox"> Не давати Mac засинати (caffeinate)</label>
+      </fieldset>
+      <fieldset class="wide">
+        <legend>Шляхи</legend>
+        <label>Скринер (smc_screener.py) <input name="screener_path" type="text"></label>
+        <label>Папка результатів <input name="results_dir" type="text"></label>
+        <label>Додаткові параметри скринера <input name="extra_args" type="text" placeholder="напр. --min-score 1 --exclude PAXG"></label>
+      </fieldset>
+      <fieldset class="wide">
+        <legend>Telegram</legend>
+        <div id="tgState" class="tgstate"></div>
+        <label class="ck"><input name="tg_enabled" type="checkbox"> Надсилати алерти в Telegram (НОВА ПАРА, ЦІНА В ЗОНІ, «скринер зупинився», «немає сканів»)</label>
+        <div class="tg-actions">
+          <button class="btn small primary" type="button" id="tgConnect">Підключити Telegram</button>
+          <button class="btn small" type="button" id="tgTest">Надіслати тест</button>
+          <button class="btn small" type="button" id="tgOff">Відключити</button>
+          <span id="tgMsg" class="muted small"></span>
+        </div>
+        <p class="muted small">Токен бота береться зі змінної <code>SMC_TG_TOKEN</code> у <code>~/.zshrc</code> — додаток його не зберігає.
+          Після підключення чи вимкнення перезапусти скринер («Стоп» → «Старт»), щоб він підхопив зміну.</p>
+      </fieldset>
+      <fieldset class="wide">
+        <legend>Журнал</legend>
+        <label class="ck"><input name="sheet_sync" type="checkbox"> Записувати в Google Таблицю: угоди (аркуш «Журнал») і результати скринера (аркуш «Скринер»)</label>
+        <p class="muted small">Вимкнено: журнал зберігається в додатку (база <code>data/journal.db</code>) з резервними копіями.
+          «Імпорт з таблиці» працює й без цього.</p>
+        <label>Друга папка для резервних копій (порожньо = лише <code>data/backup</code>)
+          <input name="backup_extra_dir" type="text" placeholder="напр. iCloud Drive">
+        </label>
+        <button class="btn small" type="button" id="btnIcloud" hidden>Використати iCloud Drive</button>
+      </fieldset>
+      <div class="form-actions">
+        <button class="btn primary" type="submit">Зберегти</button>
+        <button class="btn" type="button" id="btnReset">Скинути до стандартних</button>
+        <span id="setMsg" class="muted"></span>
+      </div>
+      <div class="cmd"><span class="muted">Команда запуску:</span><code id="cmdPreview"></code></div>
+    </form>
+
+    <div class="envbox">
+      <h3>Перевірка середовища</h3>
+      <ul id="envList" class="envlist"></ul>
+      <p class="muted small">Google Таблиця використовується, лише якщо ввімкнено «Записувати в Google Таблицю». URL і токен Google Таблиці додаток не зберігає: скринер бере їх зі змінних середовища
+        <code>SMC_SHEET_URL</code> і <code>SMC_SHEET_TOKEN</code> (див. README).</p>
+      <button class="btn" id="btnSelftest" type="button">Перевірити скринер (selftest)</button>
+      <h3 class="mt">Додаток</h3>
+      <p class="muted small">Якщо додаток запущено ярликом «SMC App» (без Терміналу), закрити його можна тут.
+        Скринер, якщо працює, після цього <b>не зупиняється</b> — алерти приходитимуть далі.</p>
+      <button class="btn danger" id="btnShutdown" type="button">Закрити додаток</button>
+      <pre id="selftestOut" class="hidden"></pre>
+    </div>
+  </section>
+</main>
+
+
+<!-- ======================= ФОРМА УГОДИ ======================= -->
+<div id="drawer" class="drawer hidden" role="dialog" aria-modal="true" aria-labelledby="dTitle">
+  <div class="drawer-bg" data-close></div>
+  <div class="drawer-panel">
+    <div class="drawer-hd">
+      <h2 id="dTitle">Нова угода</h2>
+      <button class="x" type="button" data-close aria-label="Закрити">×</button>
+    </div>
+    <div class="drawer-body">
+      <div id="sigBox" class="sigbox">
+        <div class="sig-tools">
+          <b>Сигнал скринера</b>
+          <input id="sigSearch" class="search" type="search" placeholder="Монета" autocomplete="off">
+          <select id="sigDays">
+            <option value="1">1 день</option><option value="3">3 дні</option>
+            <option value="7" selected>7 днів</option><option value="14">14 днів</option><option value="30">30 днів</option>
+          </select>
+          <label class="ck small"><input id="sigRejected" type="checkbox"> відсіяні</label>
+        </div>
+        <div id="sigList" class="siglist"></div>
+        <div id="sigChosen" class="sigchosen hidden"></div>
+      </div>
+
+      <div id="matchBanner" class="match-banner hidden"></div>
+      <form id="tForm" class="tform" autocomplete="off" novalidate>
+        <label>Дата <input name="date" type="date" required></label>
+        <label>Інструмент <input name="instrument" type="text" placeholder="напр. DOGE" required></label>
+        <div class="field">
+          <span class="lbl">Напрямок</span>
+          <div class="seg">
+            <label><input type="radio" name="dir" value="Long"><span>Long</span></label>
+            <label><input type="radio" name="dir" value="Short"><span>Short</span></label>
+          </div>
+        </div>
+        <div class="field">
+          <span class="lbl">Ризик</span>
+          <div class="seg">
+            <label><input type="radio" name="risk" value="1" checked><span>1R</span></label>
+            <label><input type="radio" name="risk" value="0.5"><span>0,5R</span></label>
+          </div>
+        </div>
+        <label>Вхід <input name="entry" type="text" inputmode="decimal" required><small class="scr" data-for="entry"></small></label>
+        <label>Стоп <input name="stop" type="text" inputmode="decimal" required><small class="scr" data-for="stop"></small></label>
+        <label>Ціль <input name="target" type="text" inputmode="decimal" required><small class="scr" data-for="target"></small></label>
+        <div class="field"><span class="lbl">R:R план</span><div class="rrbig" id="rrOut">–</div></div>
+
+        <div class="field">
+          <span class="lbl">Результат, R</span>
+          <input name="result" type="text" inputmode="decimal" placeholder="порожньо = угода відкрита">
+          <div class="calc">
+            <button type="button" class="qb" data-res="target" title="Закрито по цілі: +R:R × ризик">ціль</button>
+            <button type="button" class="qb" data-res="stop" title="Закрито по стопу: −ризик">стоп</button>
+            <button type="button" class="qb" data-res="be" title="Беззбиток: 0R">БУ</button>
+            <input id="exitPx" type="text" inputmode="decimal" placeholder="або ціна виходу" title="Ціна, за якою закрив угоду: результат порахується сам">
+          </div>
+        </div>
+        <label>Ведення угоди
+          <select name="management"><option value=""></option><option>Без змін</option><option>BE на 3R</option><option>BE на 3R + частина на 4R</option><option>Закрив самостійно достроково</option></select>
+        </label>
+        <div class="field">
+          <span class="lbl">Макс. пройдений R (MFE)</span>
+          <input name="mfe" type="text" inputmode="decimal">
+          <div class="calc">
+            <input id="mfePx" type="text" inputmode="decimal" placeholder="найкраща ціна після входу"
+                   title="Short: найнижча ціна після входу; Long: найвища. MFE порахується сам">
+          </div>
+        </div>
+        <label>За правилами? <span class="auto" id="rulesAuto"></span>
+          <select name="rules"><option value=""></option><option>так</option><option>ні</option></select>
+        </label>
+
+        <label>Тип зони
+          <select name="zone_type"><option value=""></option><option>4h OB</option><option>Локальний 1h OB</option><option>Підтримка (тіні)</option></select>
+        </label>
+        <label>Був CHoCH на 1h?
+          <select name="choch"><option value=""></option><option>так</option><option>ні</option></select>
+        </label>
+        <label>Підтримка 4h поряд?
+          <select name="support4h"><option value=""></option><option>так</option><option>ні</option></select>
+        </label>
+        <label>По скринеру? <span class="auto" id="scrAuto"></span>
+          <select name="by_screener"><option value=""></option><option>так</option><option>ні</option></select>
+        </label>
+        <label class="wide">Нотатка <textarea name="note" rows="4" placeholder="Чому вхід, що пішло не так / так, що змінити"></textarea></label>
+      </form>
+
+      <div class="checks-hd">Перевірка за правилами стратегії</div>
+      <ul id="checks" class="checks"></ul>
+      <div id="dErr" class="msg err hidden"></div>
+    </div>
+    <div class="drawer-ft">
+      <button class="btn danger" id="dDelete" type="button" hidden>Видалити угоду</button>
+      <span class="spacer"></span>
+      <button class="btn" type="button" data-close>Скасувати</button>
+      <button class="btn primary" id="dSave" type="button">Зберегти</button>
+    </div>
+  </div>
+</div>
+
+<script src="/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/app.js"></script>
+<script src="/journal.js"></script>
+<script src="/summary.js"></script>
+<script src="/strategy.js"></script>
+<script src="/history.js"></script>
+<script src="/backtest.js"></script>
+</body>
+</html>
