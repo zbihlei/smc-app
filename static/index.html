@@ -222,87 +222,27 @@
 
   <!-- ======================= БЕКТЕСТ ======================= -->
   <section id="tab-backtest" class="panel">
-    <p class="legend">Перевірка правил стратегії на історії Binance USDT-M. Результат бектесту — <b>гіпотеза</b>, яку підтверджують
-      паперові угоди, а не доказ. Етапи: <b>1. Дані</b> → <b>2. Сигнали</b> (replay скринера) → <b>3. Угоди й метрики</b> → <b>4. Розрізи</b> → <b>5. Перевірка поза вибіркою</b>.</p>
-    <div class="card btcard">
-      <div class="bt-hd"><h3>1. Дані: свічки 4h і 1h</h3><span class="muted small" id="btPeriod"></span></div>
-      <div class="bt-form">
-        <label>Період
-          <select id="btMonths"><option value="6">6 місяців</option><option value="12" selected>12 місяців</option><option value="24">24 місяці</option></select>
-        </label>
-        <label>Монет (топ за обсягом, як у скринері) <input id="btTop" type="number" min="5" max="200" value="100"></label>
-        <button class="btn primary" type="button" id="btStart">Завантажити / докачати</button>
-        <button class="btn danger" type="button" id="btStop" hidden>Зупинити</button>
+    <div class="card btcard bt-main">
+      <div class="bt-hd"><h3>Бектест</h3><span class="muted small">правила скринера на історії — гіпотеза, яку підтверджують паперові угоди</span></div>
+      <div class="bt-steps">
+        <div class="bt-step"><span class="bt-n">1</span><div class="bt-st"><b>Дані</b><span class="muted small" id="btSt1"></span></div>
+          <div class="bt-btns"><button class="btn" type="button" id="btStart">Оновити дані</button>
+            <button class="btn danger" type="button" id="btStop" hidden>Зупинити</button></div></div>
+        <div class="bt-step"><span class="bt-n">2</span><div class="bt-st"><b>Сигнали</b><span class="muted small" id="btSt2"></span></div>
+          <div class="bt-btns"><button class="btn" type="button" id="btSigStart">Знайти сигнали</button>
+            <button class="btn danger" type="button" id="btSigStop" hidden>Зупинити</button></div></div>
+        <div class="bt-step"><span class="bt-n">3</span><div class="bt-st"><b>Угоди</b><span class="muted small" id="btSt3"></span></div>
+          <div class="bt-btns"><button class="btn primary" type="submit" form="btTrForm" id="btTrRun">Прогнати угоди</button></div></div>
       </div>
-      <div id="btProg" class="bt-prog hidden">
-        <div class="bar"><i id="btBar"></i></div>
-        <div class="muted small" id="btProgTxt"></div>
-      </div>
+      <div id="btProg" class="bt-prog hidden"><div class="bar"><i id="btBar"></i></div><div class="muted small" id="btProgTxt"></div></div>
+      <div id="btSigProg" class="bt-prog hidden"><div class="bar"><i id="btSigBar"></i></div><div class="muted small" id="btSigProgTxt"></div></div>
       <div id="btMsg" class="msg hidden"></div>
-      <p class="muted small">Качає твій Mac напряму з Binance і зберігає в <code id="btPath">data/backtest/klines.db</code>.
-        Повторний запуск докачує лише нові свічки. 4h — з «розігрівом» на 500 свічок до початку періоду (як вікно скринера).
-        Список монет — топ «зараз», тож монети, яких рік тому не було в топі або які зникли, у вибірку не потрапили (упередження «вижилих»).</p>
-      <div class="bt-sum" id="btSum"></div>
-      <div class="bt-add">
-        <h4>Додати монети в кеш</h4>
-        <p class="muted small">Для монет поза поточним топом — напр., тих, що бувають у живому топі в будні. Качаються лише вони, за той самий
-          період; далі «Завантажити / докачати» оновлює їх разом з усіма, а «Знайти сигнали» їх враховує.</p>
-        <form class="bt-form" id="btAddForm" autocomplete="off">
-          <label>Монети через кому <input id="btAddSyms" type="text" placeholder="DOT, HBAR, TRX"></label>
-          <button class="btn" type="submit" id="btAddBtn">Додати в кеш</button>
-        </form>
-        <div id="btLogMiss" class="bt-miss"></div>
-      </div>
-      <details class="logbox" id="btTblBox"><summary>Монети в кеші <span class="muted" id="btTblCount"></span></summary>
-        <div class="table-wrap bt-tbl"><table><thead><tr><th>#</th><th>Монета</th><th>4h: з – до (свічок)</th><th>1h: з – до (свічок)</th><th></th></tr></thead>
-          <tbody id="btBody"></tbody></table></div>
-      </details>
-      <details class="logbox" id="btRunsBox"><summary>Запуски завантаження</summary><div id="btRuns" class="bt-runs"></div></details>
-    </div>
-    <div class="card btcard" id="btSigCard">
-      <div class="bt-hd"><h3>2. Сигнали: прохід скринера по історії</h3><span class="muted small" id="btSigPeriod"></span></div>
-      <p class="muted small">Щогодини по історії викликається функція самого скринера (<code>analyze_symbol</code>) з тими ж налаштуваннями,
-        що в «Налаштуваннях». Вона бачить лише закриті 4h-свічки (останні 499) і ціну закриття останньої години — як живий скан.
-        Подія = пара + напрям + зона (як у живих алертах). «Торкнулась» — ціна зайшла в зону всередині години (аналог алерту «наживо»).</p>
-      <div class="bt-form">
-        <button class="btn primary" type="button" id="btSigStart">Знайти сигнали</button>
-        <button class="btn danger" type="button" id="btSigStop" hidden>Зупинити</button>
-        <span class="muted small" id="btSigHint"></span>
-      </div>
-      <div id="btSigProg" class="bt-prog hidden">
-        <div class="bar"><i id="btSigBar"></i></div>
-        <div class="muted small" id="btSigProgTxt"></div>
-      </div>
       <div id="btSigMsg" class="msg hidden"></div>
-      <div id="btSigRes" class="hidden">
-        <div class="bt-sum" id="btSigSum"></div>
-        <details class="logbox" id="btSigMonthsBox"><summary>По місяцях</summary>
-          <div class="table-wrap bt-tbl"><table class="bt-num"><thead><tr><th>Місяць</th><th>Сигналів</th><th>Торкнулись зони</th><th>Long</th><th>Short</th></tr></thead>
-            <tbody id="btSigMonths"></tbody></table></div>
-        </details>
-        <div class="bt-cmp" id="btCmp"></div>
-        <details class="logbox" id="btSigEvBox"><summary>Сигнали (нові вгорі) <span class="muted" id="btSigEvCount"></span></summary>
-          <div class="table-wrap bt-tbl"><table><thead><tr><th>Поява</th><th>Монета</th><th></th><th>Статус</th><th>Зона</th><th>Вхід · стоп · ціль</th><th>R:R</th><th>Бали</th><th>У зоні</th><th>Год.</th></tr></thead>
-            <tbody id="btSigEv"></tbody></table></div>
-        </details>
-        <details class="logbox" id="btSigParBox"><summary>Налаштування скринера в цьому проході</summary><div id="btSigPar" class="bt-runs"></div></details>
-      </div>
-      <details class="logbox" id="btSigRunsBox"><summary>Запуски пошуку сигналів</summary><div id="btSigRuns" class="bt-runs"></div></details>
-    </div>
-    <div class="card btcard" id="btTrCard">
-      <div class="bt-hd"><h3>3. Угоди й метрики</h3><span class="muted small" id="btTrPeriod"></span></div>
-      <p class="muted small">Кожен сигнал «у списку» → лімітка від середини зони з рівнями сигналу. Скасування до входу — якщо 4h-свічка
-        закрилась за зоною (правило 8). Шлях ціни — по 1h; якщо стоп і ціль в одній свічці, рахуємо <b>стоп</b>. Комісії без фандінгу.
-        Без 1h-уточнення: сигнали, де середина зони вже пройдена, пропускаються. Рахуються лише <b>перші 8 місяців</b> — останні 4 приховано
-        для перевірки поза вибіркою.</p>
-      <form class="bt-form" id="btTrForm" autocomplete="off">
-        <label>Термін лімітки, год <input name="expiry_h" type="number" min="0" max="2160" step="1" value="0" title="0 — без терміну"></label>
-        <label>Maker, % <input name="maker" type="number" min="0" max="0.5" step="0.005" value="0.02"></label>
-        <label>Taker, % <input name="taker" type="number" min="0" max="0.5" step="0.005" value="0.05"></label>
-        <label class="chk"><input name="cancel_on_target" type="checkbox" checked> знімати, якщо ціль без входу</label>
-        <label class="chk"><input name="one_per_symbol" type="checkbox" checked> одна угода на монету</label>
-        <div class="bt-filters">
-          <span class="muted small">Фільтри сигналів:</span>
+      <div id="btTrMsg" class="msg hidden"></div>
+      <span class="hidden" id="btSigHint"></span>
+
+      <details class="bt-filt" id="btFiltBox"><summary>Фільтри <span class="muted small" id="btFiltTxt">без фільтрів</span></summary>
+        <form class="bt-form" id="btTrForm" autocomplete="off">
           <label>Мін. бали <select name="min_score"><option value="">усі</option><option value="0">≥ 0</option><option value="1">≥ 1</option>
             <option value="2">≥ 2</option><option value="3">≥ 3</option></select></label>
           <label>Макс. R:R <input name="max_rr" type="number" min="3" max="50" step="0.5" placeholder="без"></label>
@@ -310,19 +250,75 @@
           <label>Тип зони <select name="zones"><option value="all">усі</option><option value="OB">лише ордерблоки</option><option value="брейкер">лише брейкери</option></select></label>
           <label class="chk"><input name="no_knife" type="checkbox"> без «ножа»</label>
           <label class="chk"><input name="no_tight" type="checkbox"> без тісного стопу</label>
-        </div>
-        <button class="btn primary" type="submit" id="btTrRun">Прогнати угоди</button>
-      </form>
-      <div id="btTrMsg" class="msg hidden"></div>
+          <details class="bt-adv"><summary class="muted small">Умови прогону</summary>
+            <div class="bt-form">
+              <label>Термін лімітки, год <input name="expiry_h" type="number" min="0" max="2160" step="1" value="0" title="0 — без терміну"></label>
+              <label>Maker, % <input name="maker" type="number" min="0" max="0.5" step="0.005" value="0.02"></label>
+              <label>Taker, % <input name="taker" type="number" min="0" max="0.5" step="0.005" value="0.05"></label>
+              <label class="chk"><input name="cancel_on_target" type="checkbox" checked> знімати, якщо ціль без входу</label>
+              <label class="chk"><input name="one_per_symbol" type="checkbox" checked> одна угода на монету</label>
+            </div>
+            <p class="muted small">Лімітка від середини зони з рівнями сигналу; шлях ціни по 1h (стоп і ціль в одній свічці = стоп); комісії без фандінгу;
+              рахуються перші 8 місяців — останні 4 відкладено для перевірки поза вибіркою.</p>
+          </details>
+        </form>
+      </details>
+
       <div id="btTrRes" class="hidden">
+        <div class="bt-key" id="btKey"></div>
+        <div class="bt-summary" id="btTrSummary"></div>
+      </div>
+    </div>
+
+    <details class="card btcard bt-more" id="btMore"><summary>Детальніше <span class="muted small">дані, сигнали, усі цифри угод, розрізи, перевірка поза вибіркою</span></summary>
+
+      <details class="bt-sec" id="btSecData"><summary>Дані <span class="muted small" id="btPeriod"></span></summary>
+        <div class="bt-form">
+          <label>Період <select id="btMonths"><option value="6">6 місяців</option><option value="12" selected>12 місяців</option><option value="24">24 місяці</option></select></label>
+          <label>Монет (топ за обсягом) <input id="btTop" type="number" min="5" max="200" value="100"></label>
+        </div>
+        <p class="muted small">Свічки 4h і 1h з Binance USDT-M у <code id="btPath">data/backtest/klines.db</code>; повторно докачуються лише нові.</p>
+        <div class="bt-sum" id="btSum"></div>
+        <div class="bt-add">
+          <h4>Додати монети в кеш</h4>
+          <form class="bt-form" id="btAddForm" autocomplete="off">
+            <label>Монети через кому <input id="btAddSyms" type="text" placeholder="DOT, HBAR, TRX"></label>
+            <button class="btn" type="submit" id="btAddBtn">Додати в кеш</button>
+          </form>
+          <div id="btLogMiss" class="bt-miss"></div>
+        </div>
+        <details class="logbox" id="btTblBox"><summary>Монети в кеші <span class="muted" id="btTblCount"></span></summary>
+          <div class="table-wrap bt-tbl"><table><thead><tr><th>#</th><th>Монета</th><th>4h: з – до (свічок)</th><th>1h: з – до (свічок)</th><th></th></tr></thead>
+            <tbody id="btBody"></tbody></table></div>
+        </details>
+        <details class="logbox" id="btRunsBox"><summary>Запуски завантаження</summary><div id="btRuns" class="bt-runs"></div></details>
+      </details>
+
+      <details class="bt-sec" id="btSigCard"><summary>Сигнали й звірка з живим логом <span class="muted small" id="btSigPeriod"></span></summary>
+        <div id="btSigRes" class="hidden">
+          <div class="bt-sum" id="btSigSum"></div>
+          <div class="bt-cmp" id="btCmp"></div>
+          <details class="logbox" id="btSigMonthsBox"><summary>По місяцях</summary>
+            <div class="table-wrap bt-tbl"><table class="bt-num"><thead><tr><th>Місяць</th><th>Сигналів</th><th>Торкнулись зони</th><th>Long</th><th>Short</th></tr></thead>
+              <tbody id="btSigMonths"></tbody></table></div>
+          </details>
+          <details class="logbox" id="btSigEvBox"><summary>Сигнали (нові вгорі) <span class="muted" id="btSigEvCount"></span></summary>
+            <div class="table-wrap bt-tbl"><table><thead><tr><th>Поява</th><th>Монета</th><th></th><th>Статус</th><th>Зона</th><th>Вхід · стоп · ціль</th><th>R:R</th><th>Бали</th><th>У зоні</th><th>Год.</th></tr></thead>
+              <tbody id="btSigEv"></tbody></table></div>
+          </details>
+          <details class="logbox" id="btSigParBox"><summary>Налаштування скринера в цьому проході</summary><div id="btSigPar" class="bt-runs"></div></details>
+        </div>
+        <details class="logbox" id="btSigRunsBox"><summary>Запуски пошуку сигналів</summary><div id="btSigRuns" class="bt-runs"></div></details>
+      </details>
+
+      <details class="bt-sec" id="btTrCard"><summary>Угоди: усі цифри <span class="muted small" id="btTrPeriod"></span></summary>
         <div class="bt-funnel" id="btTrFunnel"></div>
         <div class="table-wrap bt-tbl"><table class="bt-cmp-tbl"><thead><tr><th></th><th>До цілі або стопа</th><th>За стратегією<br><span class="muted small">3R → беззбиток, 4R → 50%</span></th></tr></thead>
           <tbody id="btTrVar"></tbody></table></div>
-        <div class="bt-summary" id="btTrSummary"></div>
         <div class="bt-two">
           <div><h4>Скільки угод пройшли N R у мій бік (MFE)</h4>
             <div class="table-wrap"><table><thead><tr><th>≥</th><th>Угод</th><th>З них закрились у мінус</th></tr></thead><tbody id="btTrMfe"></tbody></table></div></div>
-          <div><h4>Long / Short <span class="muted small">(до цілі або стопа)</span></h4>
+          <div><h4>Long / Short</h4>
             <div class="table-wrap"><table><thead><tr><th></th><th>Угод</th><th>Виграшних</th><th>Сер. R</th><th>Сума R</th></tr></thead><tbody id="btTrSide"></tbody></table></div></div>
         </div>
         <details class="logbox" id="btTrMonthsBox"><summary>По місяцях (за датою закриття)</summary>
@@ -333,33 +329,30 @@
             <option value="">усі</option><option value="win">у плюс</option><option value="loss">у мінус</option><option value="open">відкриті</option></select></div>
           <div class="table-wrap bt-tbl"><table><thead><tr><th>Сигнал</th><th>Вхід</th><th>Монета</th><th></th><th>R:R</th><th>Стоп, %</th><th>R: до цілі</th><th>R: стратегія</th><th>MFE</th><th>MAE</th><th>Год.</th></tr></thead>
             <tbody id="btTrBody"></tbody></table></div></details>
-      </div>
-      <details class="logbox" id="btTrRunsBox"><summary>Прогони угод</summary><div id="btTrRuns" class="bt-runs"></div></details>
-    </div>
-    <div class="card btcard" id="btSlCard">
-      <div class="bt-hd"><h3>4. Розрізи</h3><span class="muted small" id="btSlRun"></span></div>
-      <p class="muted small">Ті самі угоди прогону з кроку 3, розбиті за ознаками сигналу на момент появи в списку. Середній R — з комісіями.
-        Групи з менш ніж 30 угодами — сірим: там легко побачити випадковість. Розрізи — це <b>гіпотези</b>: чим більше ознак перебираємо,
-        тим більше шанс знайти «закономірність», якої немає. Перевірити обраний фільтр можна лише на відкладених 4 місяцях (крок 5).</p>
-      <div class="bt-summary" id="btSlSummary"></div>
-      <div id="btSlBox" class="bt-sl"><p class="muted">Спершу «Прогнати угоди» (крок 3).</p></div>
-    </div>
-    <div class="card btcard" id="btOosCard">
-      <div class="bt-hd"><h3>5. Перевірка поза вибіркою</h3><span class="muted small" id="btOosPeriod"></span></div>
-      <p class="muted small">Останні 4 місяці не брали участі в підборі правил. Обери правила у кроці 3 (фільтри й ведення), прожени угоди,
-        і тоді відкрий для них ці 4 місяці. Чесна перевірка — <b>одна</b>: якщо після відкриття знову підкручувати фільтри й відкривати ще раз,
-        перевірка перетворюється на звичайний підбір. Кожне відкриття записується нижче.</p>
-      <div class="bt-oos-rules" id="btOosRules"></div>
-      <div class="bt-form"><button class="btn primary" type="button" id="btOosOpen" disabled>Відкрити останні 4 місяці для цих правил</button></div>
-      <div id="btOosMsg" class="msg hidden"></div>
-      <div id="btOosRes" class="hidden">
-        <div class="table-wrap bt-tbl"><table class="bt-cmp-tbl"><thead><tr><th></th><th>Розробка (8 міс.)<br><span class="muted small">до цілі · за стратегією</span></th>
-          <th>Поза вибіркою (4 міс.)<br><span class="muted small">до цілі · за стратегією</span></th></tr></thead><tbody id="btOosTbl"></tbody></table></div>
-        <div class="bt-summary" id="btOosSummary"></div>
-        <p class="muted small" id="btOosNote"></p>
-      </div>
-      <details class="logbox" id="btOosLogBox"><summary>Журнал відкриттів <span class="muted" id="btOosCount"></span></summary><div id="btOosLog" class="bt-runs"></div></details>
-    </div>
+        <details class="logbox" id="btTrRunsBox"><summary>Прогони угод</summary><div id="btTrRuns" class="bt-runs"></div></details>
+      </details>
+
+      <details class="bt-sec" id="btSlCard"><summary>Розрізи <span class="muted small" id="btSlRun"></span></summary>
+        <p class="muted small">Угоди, розбиті за ознаками сигналу. Сірим — групи з менш ніж 30 угодами. Це гіпотези для фільтрів, а не доведені правила.</p>
+        <div class="bt-summary" id="btSlSummary"></div>
+        <div id="btSlBox" class="bt-sl"><p class="muted">Спершу «Прогнати угоди».</p></div>
+      </details>
+
+      <details class="bt-sec" id="btOosCard"><summary>Перевірка поза вибіркою <span class="muted small" id="btOosPeriod"></span></summary>
+        <p class="muted small">Останні 4 місяці не брали участі в підборі. Коли правила (фільтри) остаточно обрані — відкрий їх <b>один раз</b>.
+          Кожне відкриття записується в журнал.</p>
+        <div class="bt-oos-rules" id="btOosRules"></div>
+        <div class="bt-form"><button class="btn" type="button" id="btOosOpen" disabled>Відкрити останні 4 місяці для цих правил</button></div>
+        <div id="btOosMsg" class="msg hidden"></div>
+        <div id="btOosRes" class="hidden">
+          <div class="table-wrap bt-tbl"><table class="bt-cmp-tbl"><thead><tr><th></th><th>Розробка (8 міс.)<br><span class="muted small">до цілі · за стратегією</span></th>
+            <th>Поза вибіркою (4 міс.)<br><span class="muted small">до цілі · за стратегією</span></th></tr></thead><tbody id="btOosTbl"></tbody></table></div>
+          <div class="bt-summary" id="btOosSummary"></div>
+          <p class="muted small" id="btOosNote"></p>
+        </div>
+        <details class="logbox" id="btOosLogBox"><summary>Журнал відкриттів <span class="muted" id="btOosCount"></span></summary><div id="btOosLog" class="bt-runs"></div></details>
+      </details>
+    </details>
   </section>
 
   <!-- ======================= НАЛАШТУВАННЯ ======================= -->

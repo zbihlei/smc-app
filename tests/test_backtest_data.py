@@ -129,6 +129,11 @@ check("прибрати додану монету", c.remove_extra("TINYUSDT") =
 # ================================================================ 5. вкладка «Бектест» у додатку
 from playwright.sync_api import sync_playwright, expect  # noqa: E402
 
+
+def open_bt(pg):
+    """Розкрити всі згорнуті блоки вкладки «Бектест» (спрощений вигляд ховає деталі)."""
+    pg.evaluate("document.querySelectorAll('#tab-backtest details').forEach(d => d.open = true)")
+
 PORT = 8785
 URL = f"http://127.0.0.1:{PORT}"
 appdata = tempfile.mkdtemp(prefix="smcbt_app_")
@@ -156,7 +161,7 @@ try:
         pg.on("pageerror", lambda e: errors.append(str(e)))
         pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(URL)
-        pg.click(".tab[data-tab=backtest]")
+        pg.click(".tab[data-tab=backtest]"); open_bt(pg)
         expect(pg.locator("#btSum")).to_contain_text("Кеш порожній")
         check("порожній кеш: підказка, період 12 міс. за замовчуванням", "12 міс." in pg.locator("#btPeriod").inner_text())
         pg.select_option("#btMonths", "6")
@@ -166,10 +171,10 @@ try:
         expect(pg.locator("#btSum")).to_contain_text("Монет у кеші")
         check("завантаження з вкладки: 5 монет, свічки, розмір кешу", "5" in pg.locator("#btSum .stat").first.inner_text()
               and pg.locator("#btBar").get_attribute("class") == "ok")
-        pg.click("#btTblBox summary")
+        open_bt(pg)
         expect(pg.locator("#btBody tr")).to_have_count(5)
         check("таблиця монет: діапазони 4h і 1h з кількістю свічок", "BTCUSDT" in pg.locator("#btBody").inner_text())
-        pg.click("#btRunsBox summary")
+        open_bt(pg)
         check("запуск записано в історію завантажень", "топ-5" in pg.locator("#btRuns").inner_text() and "готово" in pg.locator("#btRuns").inner_text())
         check("підказка: TINY є в живому лозі, але не в кеші (відсіяні й ті, що в кеші, — ні)",
               pg.locator("#btLogMiss [data-addsym]").count() == 1 and "TINY" in pg.locator("#btLogMiss").inner_text())

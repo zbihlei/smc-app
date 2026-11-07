@@ -37,7 +37,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))

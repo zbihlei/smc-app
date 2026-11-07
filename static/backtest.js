@@ -52,6 +52,7 @@ function renderBacktest() {
       + (run && p.eta_s ? ` · лишилось ≈ ${mins(p.eta_s)}` : "")
       + (p.weight ? ` · вага ${p.weight}/2400` : "");
   } else prog.classList.add("hidden");
+  if (p.status === "done") prog.classList.add("hidden");   // готово — видно в статусі кроку, смужка не потрібна
   if (BTS.dataErr) btMsg(BTS.dataErr, "err");
   else if (p.errors && p.errors.length) btMsg(`Помилки (${p.errors.length}):<br>` + p.errors.map(esc).join("<br>"), p.status === "error" ? "err" : "warn");
   else if (!d.screener_found) btMsg("Не знайдено smc_screener.py — список монет береться його ж функціями. Вкажи шлях у «Налаштуваннях».", "err");
@@ -75,6 +76,7 @@ function renderBacktest() {
       <td>${x.late ? '<span class="tag amber">пізній лістинг</span> ' : ""}${x.extra ? `<span class="tag">додано ${esc(x.source || "")}</span>
         <button class="linkbtn" type="button" data-rmsym="${esc(x.symbol)}">прибрати</button>` : ""}</td></tr>`).join("");
   renderLogMissing();
+  renderSteps();
   $("#btRuns").innerHTML = d.runs.length ? d.runs.map(r => `<div class="bt-run"><b>${esc((r.started_at || "").replace("T", " ").slice(0, 16))}</b>
       · ${r.months} міс., ${r.top < 0 ? `додано монет: ${-r.top}` : `топ-${r.top}`} · монет ${r.symbols ?? "–"} · свічок ${nf(r.candles)} · запитів ${nf(r.requests)}
       · <span class="${r.status === "done" ? "ok" : "warnc"}">${esc(STATUS_TXT[r.status] || r.status)}</span></div>`).join("")
@@ -114,6 +116,24 @@ $("#btBody").addEventListener("click", async ev => {
   await api("/api/backtest/data/remove", { symbol: b.dataset.rmsym });
   loadBacktest();
 });
+
+// ---------------------------------------------------------------- статуси кроків (верхня картка)
+const isoTxt = iso => iso ? `${iso.slice(8, 10)}.${iso.slice(5, 7)} ${iso.slice(11, 16)}` : "";
+const doneRun = runs => (runs || []).find(r => r.status === "done" || r.status === "done_errors");
+function renderSteps() {
+  const d = BTS.data;
+  if (!d) return;
+  const dl = doneRun(d.runs), sg = d.signals || {}, sr = doneRun(sg.runs);
+  $("#btSt1").innerHTML = d.ready ? `${d.ready} монет · ${d.period.months} міс.` + (dl ? ` · оновлено ${esc(isoTxt(dl.finished_at || dl.started_at))}` : "")
+    : "ще немає — натисни «Оновити дані»";
+  let t2 = sr ? `${nf(BTS.sigRes && BTS.sigRes.run.id === sr.id ? BTS.sigRes.summary.list : sr.events)} сигналів · ${esc(isoTxt(sr.finished_at || sr.started_at))}` : "ще не шукали";
+  if (sr && dl && (dl.finished_at || "") > (sr.started_at || "")) t2 += ' · <span class="stale">дані новіші — знайди знову</span>';
+  $("#btSt2").innerHTML = t2;
+  const r = BTS.tr;
+  let t3 = r ? `прогін №${r.id} · ${esc(isoTxt(r.created_at))}` : "ще не проганяли";
+  if (r && sg.last_done && r.sig_run_id !== sg.last_done) t3 += ' · <span class="stale">сигнали оновлено — прожени знову</span>';
+  $("#btSt3").innerHTML = t3;
+}
 
 // ============================================================ етап 2: сигнали
 const SIG_TXT = { idle: "ще не запускалось", running: "йде прохід", done: "готово", done_errors: "готово, з помилками",
@@ -155,6 +175,7 @@ function renderBtSignals() {
       + (run && p.eta_s ? ` · лишилось ≈ ${mins(p.eta_s)}` : "")
       + (!run && p.elapsed_s ? ` · за ${mins(p.elapsed_s)}` : "");
   } else prog.classList.add("hidden");
+  if (p.status === "done") prog.classList.add("hidden");   // готово — видно в статусі кроку, смужка не потрібна
   if (BTS.sigErr) sigMsg(BTS.sigErr, "err");
   else if (p.errors && p.errors.length) sigMsg(`Помилки (${p.errors.length}):<br>` + p.errors.map(esc).join("<br>"), p.status === "error" ? "err" : "warn");
   else sigMsg("");
@@ -163,6 +184,7 @@ function renderBtSignals() {
       · <span class="${r.status === "done" ? "ok" : "warnc"}">${esc(SIG_TXT[r.status] || r.status)}</span>
       ${r.status === "done" || r.status === "done_errors" ? `<button class="linkbtn" type="button" data-sigrun="${r.id}">показати</button>` : ""}</div>`).join("")
     : '<p class="muted">Запусків ще не було.</p>';
+  renderSteps();
 }
 
 function renderSigResult() {
@@ -191,6 +213,7 @@ function renderSigResult() {
   $("#btSigPar").innerHTML = `<div>${show.filter(k => k in par).map(k => `<code>${esc(k)}=${esc(String(par[k]))}</code>`).join(" ")}</div>
     <div class="muted">Команда: <code>${esc(r.run.command || "")}</code> · версія скринера (md5) <code>${esc((r.run.screener_md5 || "").slice(0, 10))}</code></div>`;
   renderCompare(r.compare);
+  renderSteps();
 }
 
 function cmpRows(list, cols) {
@@ -376,7 +399,7 @@ function fillTrForm(p) {
 function renderTrades() {
   const r = BTS.tr;
   $("#btTrRes").classList.toggle("hidden", !r);
-  if (!r) { $("#btTrRuns").innerHTML = '<p class="muted">Прогонів ще не було.</p>'; return; }
+  if (!r) { $("#btTrRuns").innerHTML = '<p class="muted">Прогонів ще не було.</p>'; renderSteps(); return; }
   const m = r.metrics;
   $("#btTrPeriod").textContent = `прогін №${r.id}: сигнали ${m.dev_from.slice(0, 10)} – ${m.dev_to.slice(0, 10)} (розробка) · ${r.filters_text}`;
   const cancels = m.cancels.map(c => `${esc(c.text)} — <b>${c.n}</b>`).join(" · ");
@@ -405,10 +428,23 @@ function renderTrades() {
   renderTrList();
   renderSlices(r);
   renderOosRules();
+  renderKey(r);
+  renderSteps();
   $("#btTrRuns").innerHTML = (r.runs || []).map(x => `<div class="bt-run"><b>${esc((x.created_at || "").replace("T", " ").slice(0, 16))}</b>
       · №${x.id} (сигнали №${x.sig_run_id}) · <b>${esc(x.filters_text)}</b> · угод ${x.trades} · сер. R ${R(x.avg_a)} / ${R(x.avg_b)} · сума ${R(x.sum_a)} / ${R(x.sum_b)}
       · термін ${x.params.expiry_h ? x.params.expiry_h + " год" : "без терміну"}${x.params.cancel_on_target ? "" : " · без зняття за ціллю"}${x.params.one_per_symbol ? "" : " · кілька угод на монету"}
       <button class="linkbtn" type="button" data-trrun="${x.id}">показати</button></div>`).join("") || '<p class="muted">Прогонів ще не було.</p>';
+}
+
+function renderKey(r) {
+  const m = r.metrics, A = m.a || {}, B = m.b || {};
+  $("#btFiltTxt").textContent = r.filters_text || "без фільтрів";
+  $("#btKey").innerHTML = A.n ? `
+    <div class="k"><span>Угод</span><b>${nf(A.n)}</b><i>${m.period_days ? `≈ ${num(A.n / m.period_days * 7, 1)} на тиждень` : ""}</i></div>
+    <div class="k"><span>Виграшних</span><b>${num(A.winrate, 0)}%</b><i>за стратегією ${B.n ? num(B.winrate, 0) + "%" : "–"}</i></div>
+    <div class="k"><span>Середній R на угоду</span><b>${R(A.avg)}</b><i>за стратегією ${B.n ? R(B.avg) : "–"}</i></div>
+    <div class="k"><span>Макс. просадка</span><b>${num(A.max_dd, 0)}R</b><i>серія збитків ${A.max_streak}</i></div>`
+    : '<p class="muted">Закритих угод немає — послаб фільтри.</p>';
 }
 
 function renderTrList() {

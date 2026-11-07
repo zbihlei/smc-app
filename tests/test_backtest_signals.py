@@ -152,6 +152,11 @@ check("у скриптах вкладок немає однакових глоб
 
 from playwright.sync_api import sync_playwright, expect  # noqa: E402
 
+
+def open_bt(pg):
+    """Розкрити всі згорнуті блоки вкладки «Бектест» (спрощений вигляд ховає деталі)."""
+    pg.evaluate("document.querySelectorAll('#tab-backtest details').forEach(d => d.open = true)")
+
 PORT = 8784
 URL = f"http://127.0.0.1:{PORT}"
 appdata = tempfile.mkdtemp(prefix="smcsig_app_")
@@ -174,7 +179,7 @@ try:
         pg.on("pageerror", lambda e: errors.append(str(e)))
         pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(URL)
-        pg.click(".tab[data-tab=backtest]")
+        pg.click(".tab[data-tab=backtest]"); open_bt(pg)
         expect(pg.locator("#btSigStart")).to_be_enabled()
         check("до першого проходу результатів немає", pg.locator("#btSigRes").is_hidden())
         pg.click("#btSigStart")
@@ -187,9 +192,9 @@ try:
         check("підсумок: сигнали на тиждень, торкання зони, Long/Short", "на тиждень" in txt and "Торкнулись" in txt, txt)
         cm = pg.locator("#btCmp").inner_text()
         check("звірка з логом у вкладці: збіглось N з M, лише в лозі / в replay", "збіглось" in cm and "Лише в живому лозі" in cm, cm[:200])
-        pg.click("#btSigEvBox summary")
+        open_bt(pg)
         check("таблиця сигналів заповнена", pg.locator("#btSigEv tr").count() >= 3)
-        pg.click("#btSigParBox summary")
+        open_bt(pg)
         check("видно налаштування проходу і версію скринера", "approach=4" in pg.locator("#btSigPar").inner_text()
               and "md5" in pg.locator("#btSigPar").inner_text())
         pg.screenshot(path=os.path.join(shots, "bt2_signals.png"), full_page=True)
@@ -199,7 +204,7 @@ try:
         pg.wait_for_timeout(1500)
         pg.click("#btSigStop")
         expect(pg.locator("#btSigProgTxt")).to_contain_text("зупинено", timeout=15000)
-        pg.click("#btSigRunsBox summary")
+        open_bt(pg)
         check("зупинений прохід позначено, попередній результат лишається", "зупинено" in pg.locator("#btSigRuns").inner_text()
               and pg.locator("#btSigRes").is_visible())
         pg.set_viewport_size({"width": 390, "height": 844})

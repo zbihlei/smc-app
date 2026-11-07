@@ -177,6 +177,11 @@ except ValueError:
 # ================================================================ 5. вкладка
 from playwright.sync_api import sync_playwright, expect  # noqa: E402
 
+
+def open_bt(pg):
+    """Розкрити всі згорнуті блоки вкладки «Бектест» (спрощений вигляд ховає деталі)."""
+    pg.evaluate("document.querySelectorAll('#tab-backtest details').forEach(d => d.open = true)")
+
 PORT = 8783
 URL = f"http://127.0.0.1:{PORT}"
 appdata = tempfile.mkdtemp(prefix="smctr_app_")
@@ -202,7 +207,7 @@ try:
         pg.on("pageerror", lambda e: errors.append(str(e)))
         pg.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         pg.goto(URL)
-        pg.click(".tab[data-tab=backtest]")
+        pg.click(".tab[data-tab=backtest]"); open_bt(pg)
         expect(pg.locator("#btTrRun")).to_be_enabled()
         check("до першого прогону результатів немає", pg.locator("#btTrRes").is_hidden())
         pg.click("#btTrRun")
@@ -219,11 +224,14 @@ try:
         v = pg.locator("#btTrVar").inner_text()
         check("порівняння двох варіантів ведення: середній R, PF, просадка, серія", "Середній R" in v and "Profit factor" in v
               and "просадка" in v and "серія" in v, v[:200])
+        check("головне зверху: 4 ключові цифри і статуси кроків", pg.locator("#btKey .k").count() == 4
+              and "прогін №" in pg.locator("#btSt3").inner_text() and "сигналів" in pg.locator("#btSt2").inner_text()
+              and "монет" in pg.locator("#btSt1").inner_text(), (pg.locator("#btSt1").inner_text(), pg.locator("#btSt2").inner_text()))
         check("висновок простими словами під таблицею угод", pg.locator("#btTrSummary .verdict").count() == 1
               and pg.locator("#btTrSummary li").count() >= 4)
         check("воронка: сигналів → входів → причини скасування", "Входів" in pg.locator("#btTrFunnel").inner_text())
         check("MFE: 5 рядків", pg.locator("#btTrMfe tr").count() == 5)
-        pg.click("#btTrListBox summary")
+        open_bt(pg)
         n_all = pg.locator("#btTrBody tr").count()
         pg.select_option("#btTrFilter", "loss")
         n_loss = pg.locator("#btTrBody tr").count()
@@ -233,7 +241,7 @@ try:
         pg.fill("#btTrForm input[name=expiry_h]", "48")
         pg.click("#btTrRun")
         expect(pg.locator("#btTrMsg")).to_contain_text("Готово", timeout=60000)
-        pg.click("#btTrRunsBox summary")
+        open_bt(pg)
         check("другий прогін з терміном 48 год — в історії прогонів", pg.locator("#btTrRuns .bt-run").count() == 2
               and "48 год" in pg.locator("#btTrRuns").inner_text())
         pg.locator("#btTrRuns [data-trrun]").last.click()
@@ -265,7 +273,7 @@ try:
         check("повторне відкриття — попередження про знецінення перевірки", "відкривали 2 рази" in pg.locator("#btOosNote").inner_text())
         pg.screenshot(path=os.path.join(shots, "bt45_slices_oos.png"), full_page=True)
         pg.reload()
-        pg.click(".tab[data-tab=backtest]")
+        pg.click(".tab[data-tab=backtest]"); open_bt(pg)
         expect(pg.locator("#btTrRes")).to_be_visible(timeout=10000)
         check("після перезавантаження останній прогін показується одразу", True)
         pg.set_viewport_size({"width": 390, "height": 844})
