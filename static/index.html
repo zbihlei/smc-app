@@ -12,6 +12,7 @@
   <div class="brand">SMC<span>App</span></div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="screener" role="tab">Скринер</button>
+    <button class="tab" data-tab="spot" role="tab">Спот</button>
     <button class="tab" data-tab="journal" role="tab">Журнал</button>
     <button class="tab" data-tab="summary" role="tab">Підсумок</button>
     <button class="tab" data-tab="strategy" role="tab">Стратегія</button>
@@ -79,6 +80,53 @@
   </section>
 
   <!-- ======================= ЖУРНАЛ ======================= -->
+  <section id="tab-spot" class="panel">
+    <div class="card">
+      <div class="bt-hd"><h3>Спот: «шансові» монети</h3>
+        <span class="muted small">Binance Spot · денні свічки · тримати тижні–місяці · невеликі суми · не фінансова порада</span></div>
+      <div class="sp-bar">
+        <button class="btn primary" type="button" id="spScan">Сканувати</button>
+        <span class="muted small" id="spSt"></span>
+      </div>
+      <div id="spProg" class="bt-prog hidden"><div class="bar"><i id="spBarI"></i></div><div class="muted small" id="spProgTxt"></div></div>
+      <div id="spMsg" class="msg hidden"></div>
+      <div class="sp-filt" id="spFilt">
+        <button type="button" class="chip on" data-k="all">усі <span id="spNAll"></span></button>
+        <button type="button" class="chip" data-k="накопичення">накопичення <span id="spNAcc"></span></button>
+        <button type="button" class="chip" data-k="новий лістинг">нові лістинги <span id="spNNew"></span></button>
+        <label class="chk muted small"><input type="checkbox" id="spOnlyNew"> лише нові сьогодні</label>
+      </div>
+      <div class="table-wrap bt-tbl sp-tbl"><table><thead><tr><th>Монета</th><th>Що</th><th>Чому в списку</th><th>Ціна</th><th>Обсяг 24 год</th>
+        <th>7 днів</th><th>Від максимуму</th><th>База (нижче — ідея зламана)</th><th>У списку з</th></tr></thead>
+        <tbody id="spBody"></tbody></table></div>
+      <p class="muted small" id="spEmpty"></p>
+      <details class="bt-filt" id="spCritBox"><summary>Критерії пошуку</summary>
+        <form class="bt-form" id="spForm" autocomplete="off" novalidate>
+          <label>Пропустити топ-N за обсягом <input name="skip_top" type="number" min="0" max="300" step="10"></label>
+          <label>Обсяг за добу, від млн $ <input name="vol_min" type="number" min="0" step="0.5"></label>
+          <label>до млн $ <input name="vol_max" type="number" min="1" step="5"></label>
+          <div class="bt-filters"><span class="muted small">Накопичення:</span>
+            <label>Днів у діапазоні <input name="acc_days" type="number" min="14" max="120" step="1"></label>
+            <label>Діапазон ціни ≤ % <input name="acc_range" type="number" min="5" max="100" step="5"></label>
+            <label>Обсяг ×, не менше <input name="acc_vol_ratio" type="number" min="1" max="10" step="0.1"></label>
+            <label>Над мінімумом ≤ % <input name="acc_max_up" type="number" min="0" max="100" step="5"></label></div>
+          <div class="bt-filters"><span class="muted small">Новий лістинг:</span>
+            <label>Вік від, днів <input name="new_min_days" type="number" min="1" max="399" step="1"></label>
+            <label>до, днів <input name="new_max_days" type="number" min="2" max="400" step="1"></label>
+            <label>Відкат від піку ≥ % <input name="new_drawdown" type="number" min="10" max="99" step="5"></label>
+            <label>Без нового мінімуму, днів <input name="new_hold_days" type="number" min="1" max="60" step="1"></label></div>
+          <button class="btn" type="submit">Сканувати з цими критеріями</button>
+          <button class="btn" type="button" id="spReset">Стандартні</button>
+        </form>
+        <p class="muted small"><b>Накопичення</b>: ціна N днів у вузькому діапазоні, а обсяг за останні 2 тижні помітно більший за звичайний
+          (60 днів до того) — хтось купує, поки ціна стоїть; ціна ще не відійшла від мінімуму діапазону. <b>Новий лістинг</b>: монета на Binance
+          від N до M днів, після перших піків відкотилась щонайменше на X% і вже кілька днів не оновлює мінімум.
+          «База» — мінімум/максимум цього діапазону: закриття дня нижче мінімуму означає, що ідея не спрацювала.
+          Це гіпотези з порогами, а не перевірені правила. Такі монети можуть впасти до нуля — купуй лише суму, яку готовий втратити.</p>
+      </details>
+    </div>
+  </section>
+
   <section id="tab-journal" class="panel">
     <div class="j-head">
       <div class="j-stats" id="jStats"></div>
@@ -242,7 +290,7 @@
       <span class="hidden" id="btSigHint"></span>
 
       <details class="bt-filt" id="btFiltBox"><summary>Фільтри <span class="muted small" id="btFiltTxt">без фільтрів</span></summary>
-        <form class="bt-form" id="btTrForm" autocomplete="off">
+        <form class="bt-form" id="btTrForm" autocomplete="off" novalidate>
           <label>Мін. бали <select name="min_score"><option value="">усі</option><option value="0">≥ 0</option><option value="1">≥ 1</option>
             <option value="2">≥ 2</option><option value="3">≥ 3</option></select></label>
           <label>Макс. R:R <input name="max_rr" type="number" min="3" max="50" step="0.5" placeholder="без"></label>
@@ -382,6 +430,7 @@
         <label class="ck"><input name="tv_button" type="checkbox"> Кнопка «Відкрити в TradingView» у вікні</label>
         <label class="ck"><input name="voice" type="checkbox"> Голос (--voice)</label>
         <label class="ck"><input name="stop_wick" type="checkbox"> Стоп за гнотом поруч із зоною (--stop-wick)</label>
+        <label class="ck"><input name="spot_auto" type="checkbox"> Вкладка «Спот»: сканувати раз на добу, поки додаток відкритий</label>
         <label class="ck"><input name="breakers" type="checkbox"> Шукати брейкер-блоки (пробиті ордерблоки; вимкнено = --no-breakers)</label>
         <label class="ck"><input name="caffeinate" type="checkbox"> Не давати Mac засинати (caffeinate)</label>
       </fieldset>
@@ -555,5 +604,6 @@
 <script src="/strategy.js"></script>
 <script src="/history.js"></script>
 <script src="/backtest.js"></script>
+<script src="/spot.js"></script>
 </body>
 </html>

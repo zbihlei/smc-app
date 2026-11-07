@@ -33,11 +33,12 @@ import backtest_data
 import backtest_signals
 import backtest_trades
 import gitsync
+import spot_scan
 import journal
 import tg
 import stats
 
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -70,6 +71,7 @@ DEFAULTS = {
     "extra_args": "",
     "git_autopush": True,         # автозбереження коду в GitHub (лише якщо папку підключено до git)
     "breakers": True,             # шукати брейкер-блоки (скринер v2.6+); вимкнено -> --no-breakers
+    "spot_auto": True,            # вкладка «Спот»: сканувати раз на добу, поки додаток відкритий
 }
 # межі для числових полів: (мін, макс, тип)
 LIMITS = {
@@ -77,7 +79,7 @@ LIMITS = {
     "price_check": (0, 600, float), "min_stop_atr": (0, 5, float), "entry_tol": (0, 50, float),
 }
 TRENDS = ("strict", "flag", "bos")
-FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers")
+FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers", "spot_auto")
 ICLOUD_DIR = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs")
 
 
@@ -980,6 +982,47 @@ GIT = gitsync.GitSync(os.environ.get("SMC_GIT_DIR") or APP_DIR, os.path.join(DAT
                       interval=float(os.environ.get("SMC_GIT_INTERVAL") or 60))
 
 
+# ---------------------------------------------------------------- Спот: «шансові» монети (денні свічки)
+SPOT = spot_scan.SpotScanner(DATA_DIR)
+
+
+def spot_state():
+    lat = SPOT.latest()
+    return {"latest": lat, "progress": SPOT.progress, "running": SPOT.running(), "defaults": spot_scan.DEFAULTS,
+            "auto": bool(load_settings().get("spot_auto"))}
+
+
+def spot_start(body):
+    try:
+        params = body.get("params")
+        if params is None:
+            lat = SPOT.latest()
+            params = (lat or {}).get("params") or {}
+        started = SPOT.start(params)
+    except ValueError as e:
+        return 400, {"ok": False, "error": str(e)}
+    if not started:
+        return 409, {"ok": False, "error": "скан уже йде"}
+    return 200, dict(spot_state(), ok=True)
+
+
+def spot_auto_loop(every=3600, max_age_h=24):
+    """Раз на годину: якщо автоскан увімкнено, а останньому скану понад добу — сканувати з тими ж критеріями."""
+    while True:
+        time.sleep(every)
+        try:
+            if not load_settings().get("spot_auto") or SPOT.running():
+                continue
+            lat = SPOT.latest()
+            age = None
+            if lat and lat.get("generated"):
+                age = (dt.datetime.now() - dt.datetime.fromisoformat(lat["generated"])).total_seconds() / 3600
+            if lat is None or age is None or age >= max_age_h:
+                SPOT.start((lat or {}).get("params") or {})
+        except Exception:
+            pass
+
+
 def extra_dir():
     return load_settings().get("backup_extra_dir") or None
 
@@ -1230,6 +1273,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, stats.build(JOURNAL.list(), period))
         if u.path == "/api/backtest/status":
             return self._send(200, bt_status())
+        if u.path == "/api/spot":
+            return self._send(200, spot_state())
         if u.path == "/api/git/status":
             return self._send(200, GIT.status())
         if u.path == "/api/backtest/oos":
@@ -1380,6 +1425,9 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/backtest/data/start":
             code, res = bt_start(body)
             return self._send(code, res)
+        if u.path == "/api/spot/scan":
+            code, res = spot_start(body)
+            return self._send(code, res)
         if u.path == "/api/git/push":
             GIT.sync(force=True)
             return self._send(200, GIT.status())
@@ -1468,6 +1516,7 @@ def main():
         print(f"Скринер уже працює з попереднього запуску (pid {SCREENER.state.get('pid')}), підхоплюю його.")
     threading.Thread(target=watchdog, daemon=True).start()
     GIT.start()
+    threading.Thread(target=spot_auto_loop, daemon=True).start()
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:

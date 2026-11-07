@@ -504,3 +504,9 @@ table.gt td:first-child { white-space: normal; min-width: 90px; }
 .bt-more > summary { font-size: 16px; }
 .bt-sec { border-top: 1px solid var(--line-2); padding: 8px 0; }
 .bt-sec[open] > summary { margin-bottom: 6px; }
+/* Вкладка «Спот» */
+.sp-bar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 10px 0; }
+.sp-filt { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 6px 0 8px; }
+.sp-filt .chk { margin-left: 8px; display: flex; gap: 5px; align-items: center; }
+.sp-tbl td.sp-why { min-width: 220px; font-size: 12.5px; }
+.sp-tbl tr.sp-new td { background: #f3fbf5; }

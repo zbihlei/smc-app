@@ -88,6 +88,7 @@ function openTab(name) {
   if (name === "strategy" && window.loadStrategy) window.loadStrategy();
   if (name === "history" && window.loadHistory) window.loadHistory();
   if (name === "backtest" && window.loadBacktest) window.loadBacktest();
+  if (name === "spot" && window.loadSpot) window.loadSpot();
   if (name === "screener") S.charts.forEach(c => c.redraw && c.redraw());
 }
 $$(".tab").forEach(b => b.addEventListener("click", () => openTab(b.dataset.tab)));
