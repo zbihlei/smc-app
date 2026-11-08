@@ -115,10 +115,15 @@ try:
 
         pg.click(".tab[data-tab=settings]")
         expect(pg.locator("#cmdPreview")).to_contain_text("--watch 1")
+        check("мін. обсяг торгів: за замовчуванням 30 млн $ у списку й у команді",
+              pg.input_value("select[name=min_volume]") == "30" and "--min-volume 30" in pg.locator("#cmdPreview").inner_text())
         pg.fill("input[name=approach]", "5")
+        pg.select_option("select[name=min_volume]", "50")
         pg.click("#setForm button[type=submit]")
         expect(pg.locator("#setMsg")).to_contain_text("Збережено")
         check("налаштування зберігаються, команда оновлюється", "--approach 5" in pg.locator("#cmdPreview").inner_text())
+        check("вибір обсягу 50 млн $ → --min-volume 50", "--min-volume 50" in pg.locator("#cmdPreview").inner_text()
+              and pg.input_value("select[name=min_volume]") == "50")
         bad = pg.evaluate("""fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-SMC-App': '1'},
                              body: JSON.stringify({settings: {watch: 0, top: 'abc'}})}).then(r => r.json())""")
         check("сервер відхиляє некоректні значення з поясненням", not bad["ok"] and len(bad["errors"]) == 2)

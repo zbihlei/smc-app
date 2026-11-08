@@ -468,7 +468,11 @@ function fillForm(s) {
   Object.entries(s).forEach(([k, v]) => {
     const el = f.elements[k];
     if (!el) return;
-    if (el.type === "checkbox") el.checked = !!v; else el.value = v;
+    if (el.tagName === "SELECT" && v !== "" && v != null && ![...el.options].some(o => Number(o.value) === Number(v) || o.value === String(v)))
+      el.add(new Option(String(v), String(v)));  // значення не зі списку (напр. задане вручну) — показати як є
+    if (el.type === "checkbox") el.checked = !!v;
+    else if (el.tagName === "SELECT") el.value = ([...el.options].find(o => Number(o.value) === Number(v)) || {}).value ?? String(v);
+    else el.value = v;
   });
 }
 function formValues() {

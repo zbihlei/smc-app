@@ -415,6 +415,16 @@
         <legend>Скан</legend>
         <label>Скан кожні, хв <input name="watch" type="number" step="1" min="1"></label>
         <label>Пар у скані (--top) <input name="top" type="number" step="1" min="1"></label>
+        <label>Мін. обсяг торгів за 24 год (--min-volume)
+          <select name="min_volume">
+            <option value="5">від 5 млн $ — більше дрібних монет</option>
+            <option value="10">від 10 млн $</option>
+            <option value="20">від 20 млн $</option>
+            <option value="30">від 30 млн $ (за замовчуванням)</option>
+            <option value="50">від 50 млн $</option>
+            <option value="100">від 100 млн $</option>
+            <option value="200">від 200 млн $ — лише найліквідніші</option>
+          </select></label>
         <label>Відстань «підходу», % (--approach) <input name="approach" type="number" step="0.1" min="0.1"></label>
         <label>Перевірка ціни, с (0 = вимкнути) <input name="price_check" type="number" step="1" min="0"></label>
         <label>Тісний стоп: поріг × середньої свічки <input name="min_stop_atr" type="number" step="0.1" min="0"></label>

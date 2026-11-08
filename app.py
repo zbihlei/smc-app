@@ -39,7 +39,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.5"
+APP_VERSION = "1.5.1"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -55,6 +55,7 @@ DEFAULTS = {
     "watch": 30,
     "approach": 4,
     "top": 100,
+    "min_volume": 30,             # мін. обсяг торгів за 24 год, млн $ (скринер: --min-volume; монети з меншим обсягом не скануються)
     "price_check": 15,
     "min_stop_atr": 0.6,
     "entry_tol": 25,              # допуск входу, % висоти зони (скринер v2.7+: --entry-tol)
@@ -77,7 +78,7 @@ DEFAULTS = {
 }
 # межі для числових полів: (мін, макс, тип)
 LIMITS = {
-    "watch": (1, 240, float), "approach": (0.1, 50, float), "top": (1, 500, int),
+    "watch": (1, 240, float), "approach": (0.1, 50, float), "top": (1, 500, int), "min_volume": (1, 1000, float),
     "price_check": (0, 600, float), "min_stop_atr": (0, 5, float), "entry_tol": (0, 50, float),
 }
 TRENDS = ("strict", "flag", "bos")
@@ -161,6 +162,7 @@ def build_command(s):
     num = lambda x: f"{x:g}" if isinstance(x, float) else str(x)
     cmd = [sys.executable, "-u", RUNNER, screener_path(s),
            "--watch", num(s["watch"]), "--approach", num(s["approach"]), "--top", str(int(s["top"])),
+           "--min-volume", num(float(s["min_volume"])),
            "--price-check", num(s["price_check"]), "--min-stop-atr", num(s["min_stop_atr"]),
            "--trend", s["trend"], "--out", results_dir(s)]
     for flag, opt in (("popup", "--popup"), ("voice", "--voice"), ("tv_button", "--tv-button"), ("stop_wick", "--stop-wick")):
