@@ -9,7 +9,7 @@ import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-TF = {"4h": 4 * 3600_000, "1h": 3600_000}
+TF = {"4h": 4 * 3600_000, "1h": 3600_000, "15m": 15 * 60_000}
 SYMBOLS = {  # символ -> (обсяг, лістинг ms або None)
     "BTCUSDT": (9e9, None), "ETHUSDT": (5e9, None), "SOLUSDT": (2e9, None), "DOGEUSDT": (1e9, None),
     "NEWUSDT": (8e8, "late"),       # з'явилась 60 днів тому
@@ -32,7 +32,7 @@ S = State()
 
 
 def listed_ms(sym):
-    lst = SYMBOLS[sym][1]
+    lst = SYMBOLS.get(sym, (0, None))[1]
     if lst == "late":
         return int(time.time() * 1000) - 60 * 86400_000
     return 0
@@ -88,6 +88,9 @@ class H(BaseHTTPRequestHandler):
             end = int(q.get("endTime", time.time() * 1000))
             limit = min(int(q.get("limit", 500)), 1500)
             now = S.now or int(time.time() * 1000)
+            if "startTime" not in q:  # як на біржі: без startTime — останні limit свічок (включно з поточною)
+                start = min(end, now) - (limit - 1) * step
+                start -= start % step
             t = max(start, listed_ms(sym))
             t = t + (-t % step)  # вирівняти на початок свічки
             out = []

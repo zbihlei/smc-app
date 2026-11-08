@@ -13,6 +13,12 @@ import urllib.request
 from playwright.sync_api import sync_playwright, expect
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import fake_binance as FB  # noqa: E402  — свічки 1h/15m для лайв-графіків без мережі
+FB.serve(8798)
+for _k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+    os.environ.pop(_k, None)
+os.environ["NO_PROXY"] = os.environ["no_proxy"] = "127.0.0.1,localhost"
 APP = os.path.dirname(HERE)
 PORT = 8799
 URL = f"http://127.0.0.1:{PORT}"
@@ -34,7 +40,7 @@ def check(name, cond):
 
 
 def start_app():
-    env = dict(os.environ, SMC_APP_DATA=data_dir)
+    env = dict(os.environ, SMC_APP_DATA=data_dir, SMC_BT_FAPI="http://127.0.0.1:8798")
     p = subprocess.Popen([sys.executable, os.path.join(APP, "app.py"), "--port", str(PORT), "--no-browser"],
                          env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     for _ in range(50):
@@ -62,6 +68,7 @@ try:
     with sync_playwright() as pw:
         b = pw.chromium.launch()
         pg = b.new_page(viewport={"width": 1440, "height": 1000})
+        pg.add_init_script("window.SMC_NO_WS = true;")
         pg.on("console", lambda m: errors.append(m.text) if m.type == "error" and "400 (Bad Request)" not in m.text else None)  # 400 — навмисні перевірки валідації
         pg.on("pageerror", lambda e: errors.append(str(e)))
         pg.on("dialog", lambda d: d.accept())

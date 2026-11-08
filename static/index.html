@@ -62,12 +62,14 @@
       <div id="empty" class="empty hidden"></div>
     </div>
 
-    <h3 class="sec">Графіки <span class="muted" id="chartsCount"></span></h3>
+    <h3 class="sec">Графіки <span class="muted" id="chartsCount"></span> <span class="muted small" id="liveBadge"></span></h3>
     <p class="legend">
       <span class="lg zone"></span>зона входу (фіолетова пунктирна — середина)
       <span class="lg risk"></span>ризик до стопа
       <span class="lg rew"></span>шлях до цілі
-      <span class="lg path"></span>сценарій-ілюстрація, не прогноз. Колесо миші — масштаб, перетягування — рух.
+      <span class="lg path"></span>сценарій-ілюстрація, не прогноз (лише в режимі одного графіка 4h).
+      <span class="lg ob15"></span>15m-ордерблок після зламу: синя лінія — лімітка 15m, червона — стоп 15m, помаранчева — рівень зламу.
+      Колесо миші — масштаб, перетягування — рух.
     </p>
     <div id="charts" class="grid"></div>
 
@@ -432,6 +434,7 @@
         <label class="ck"><input name="voice" type="checkbox"> Голос (--voice)</label>
         <label class="ck"><input name="stop_wick" type="checkbox"> Стоп за гнотом поруч із зоною (--stop-wick)</label>
         <label class="ck"><input name="spot_auto" type="checkbox"> Вкладка «Спот»: сканувати раз на добу, поки додаток відкритий</label>
+        <label class="ck"><input name="ltf_enabled" type="checkbox"> Скринер: лайв-графіки 4h + 1h + 15m і уточнення входу на 15m (алерт на злам 15m у зоні)</label>
         <label class="ck"><input name="breakers" type="checkbox"> Шукати брейкер-блоки (пробиті ордерблоки; вимкнено = --no-breakers)</label>
         <label class="ck"><input name="caffeinate" type="checkbox"> Не давати Mac засинати (caffeinate)</label>
       </fieldset>
@@ -606,5 +609,6 @@
 <script src="/history.js"></script>
 <script src="/backtest.js"></script>
 <script src="/spot.js"></script>
+<script src="/live.js"></script>
 </body>
 </html>

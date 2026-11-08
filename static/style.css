@@ -510,3 +510,19 @@ table.gt td:first-child { white-space: normal; min-width: 90px; }
 .sp-filt .chk { margin-left: 8px; display: flex; gap: 5px; align-items: center; }
 .sp-tbl td.sp-why { min-width: 220px; font-size: 12.5px; }
 .sp-tbl tr.sp-new td { background: #f3fbf5; }
+
+/* v1.5 — лайв-графіки 4h + 1h + 15m: по три в ряд */
+#charts.live { grid-template-columns: 1fr; }
+.tf3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tfbox { min-width: 0; border: 1px solid var(--line, #e0e3eb); border-radius: 6px; overflow: hidden; }
+.tflb { font-size: 12px; color: var(--muted); padding: 3px 8px; border-bottom: 1px solid var(--line, #e0e3eb); background: #fafbfc; }
+.chart.ch3 { height: 360px; }
+.ltfline { font-size: 13px; padding: 6px 2px 2px; }
+.ltf-go { color: #2962ff; }
+.ltf-bad { color: #f23645; }
+.live-on { color: #089981; }
+.lg.ob15 { background: rgba(41,98,255,0.25); border: 1px solid rgba(41,98,255,0.6); }
+@media (max-width: 900px) {
+  .tf3 { grid-template-columns: 1fr; }
+  .chart.ch3 { height: 300px; }
+}

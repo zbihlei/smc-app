@@ -315,10 +315,14 @@ function destroyCharts() {
   S.charts.clear();
 }
 
+// лайв-графіки 4h+1h+15m (v1.5): вимикаються в «Налаштуваннях» — тоді один графік 4h, як раніше
+function liveOn() { return !(S.settings && S.settings.ltf_enabled === false); }
+
 function renderCharts() {
   destroyCharts();
   const rows = visibleRows();
   const box = $("#charts");
+  box.classList.toggle("live", liveOn());
   $("#chartsCount").textContent = rows.length ? `(${rows.length})` : "";
   box.innerHTML = rows.map(r => {
     const extra = (r.sweep ? " | " + esc(r.sweep) : "") + (r.volume && r.volume !== "-" ? " | обсяг: " + esc(r.volume) : "");
@@ -327,7 +331,13 @@ function renderCharts() {
       <div class="hd"><b>${r.idx + 1}. ${esc(r.symbol)}</b> <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.zone_type === "брейкер" ? ' <span class="tag amber">брейкер</span>' : ""}
         | ${esc(r.status)} | вхід ${fmt(r.entry)} · стоп ${fmt(r.stop)} · ціль ${fmt(r.target)} | <b>R:R ${fix(r.rr, 1)}</b>${extra}${warn}
         | <a href="${tvLink(r.symbol)}" target="_blank" rel="noopener">TradingView</a></div>
-      <div class="chart" id="ch${r.idx}">${r.chart && r.chart.length > 2 ? "" : '<div class="nochart">Графіка немає: дані свічок з\'являться після скану, запущеного з додатка.</div>'}</div>
+      ${liveOn() ? `<div class="tf3">
+        <div class="tfbox"><div class="tflb">4h · сигнал</div><div class="chart ch3" id="ch${r.idx}"></div></div>
+        <div class="tfbox"><div class="tflb" id="lb1h${r.idx}">1h</div><div class="chart ch3" id="ch1h${r.idx}"></div></div>
+        <div class="tfbox"><div class="tflb">15m · уточнення входу</div><div class="chart ch3" id="ch15${r.idx}"></div></div>
+      </div>
+      <div class="ltfline" id="lt${r.idx}"><span class="muted">15m: рахую уточнення…</span></div>`
+      : `<div class="chart" id="ch${r.idx}">${r.chart && r.chart.length > 2 ? "" : '<div class="nochart">Графіка немає: дані свічок з\'являться після скану, запущеного з додатка.</div>'}</div>`}
     </div>`;
   }).join("");
   if (typeof LightweightCharts === "undefined") {
@@ -341,7 +351,13 @@ function renderCharts() {
       const i = +en.target.id.slice(1);
       S.observer.unobserve(en.target);
       const r = S.rows[i];
-      if (r && r.chart && r.chart.length > 2 && !S.charts.has(i)) {
+      if (!r || S.charts.has(i)) return;
+      if (liveOn() && typeof liveMount === "function") {
+        // лайв: 4h + 1h + 15m (свічки з Binance через додаток, далі — наживо)
+        const h = { destroy: () => {} };
+        S.charts.set(i, h);
+        liveMount(i, r).then(x => { if (S.charts.get(i) === h) S.charts.set(i, x); else x.destroy(); }).catch(e => console.error(e));
+      } else if (r.chart && r.chart.length > 2) {
         try { S.charts.set(i, buildChart(document.getElementById("ch" + i), r)); }
         catch (e) { console.error(e); }
       }
@@ -468,7 +484,9 @@ $("#setForm").addEventListener("submit", async e => {
   const r = await api("/api/settings", { settings: formValues() });
   const m = $("#setMsg");
   if (r.ok) {
+    const wasLive = liveOn();
     S.settings = r.settings;
+    if (wasLive !== liveOn()) renderCharts();
     m.textContent = r.message; m.style.color = "var(--green)";
     $("#cmdPreview").textContent = r.command || "";
     loadSettings();  // оновити й блоки стану (Telegram, середовище)

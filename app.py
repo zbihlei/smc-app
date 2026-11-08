@@ -34,11 +34,12 @@ import backtest_signals
 import backtest_trades
 import gitsync
 import spot_scan
+import ltf
 import journal
 import tg
 import stats
 
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.5"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -72,6 +73,7 @@ DEFAULTS = {
     "git_autopush": True,         # автозбереження коду в GitHub (лише якщо папку підключено до git)
     "breakers": True,             # шукати брейкер-блоки (скринер v2.6+); вимкнено -> --no-breakers
     "spot_auto": True,            # вкладка «Спот»: сканувати раз на добу, поки додаток відкритий
+    "ltf_enabled": True,          # уточнення входу на 15m + алерт «УТОЧНЕННЯ 15m»
 }
 # межі для числових полів: (мін, макс, тип)
 LIMITS = {
@@ -79,7 +81,7 @@ LIMITS = {
     "price_check": (0, 600, float), "min_stop_atr": (0, 5, float), "entry_tol": (0, 50, float),
 }
 TRENDS = ("strict", "flag", "bos")
-FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers", "spot_auto")
+FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers", "spot_auto", "ltf_enabled")
 ICLOUD_DIR = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs")
 
 
@@ -982,6 +984,40 @@ GIT = gitsync.GitSync(os.environ.get("SMC_GIT_DIR") or APP_DIR, os.path.join(DAT
                       interval=float(os.environ.get("SMC_GIT_INTERVAL") or 60))
 
 
+# ---------------------------------------------------------------- 4h + 1h + 15m: лайв-графіки й уточнення входу на 15m
+def ltf_rows():
+    """Сигнали «у списку» з останнього скану (не старші за 3 години — інакше скринер, імовірно, не працює)."""
+    if not load_settings().get("ltf_enabled", True):
+        return []
+    res = read_results(load_settings())
+    if res.get("source") != "app" or res.get("age_s", 1e9) > 3 * 3600:
+        return []
+    return [r for r in (res.get("data") or {}).get("candidates", []) if r.get("symbol") and r.get("zone_low")]
+
+
+LTF = ltf.LtfWatcher(DATA_DIR, ltf_rows, lambda t, x: notify_mac(t, x),
+                     get_tol=lambda: float(load_settings().get("entry_tol") or 0),
+                     interval=float(os.environ.get("SMC_LTF_INTERVAL") or 60))
+
+
+def klines_api(q):
+    sym = ((q.get("symbol") or [""])[0]).upper()
+    tf = (q.get("tf") or ["15m"])[0]
+    try:
+        limit = int((q.get("limit") or ["200"])[0])
+    except ValueError:
+        limit = 200
+    if not re.fullmatch(r"[A-Z0-9]{2,30}", sym):
+        return 400, {"ok": False, "error": "некоректна монета"}
+    try:
+        return 200, {"ok": True, "symbol": sym, "tf": tf, "bars": ltf.fetch_klines(sym, tf, limit)}
+    except ValueError as e:
+        return 400, {"ok": False, "error": str(e)}
+    except Exception as e:
+        # 200, а не 502: інтерфейс сам покаже «немає свічок» (без червоних помилок у консолі браузера)
+        return 200, {"ok": False, "error": f"Binance недоступний: {e}"}
+
+
 # ---------------------------------------------------------------- Спот: «шансові» монети (денні свічки)
 SPOT = spot_scan.SpotScanner(DATA_DIR)
 
@@ -1273,6 +1309,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, stats.build(JOURNAL.list(), period))
         if u.path == "/api/backtest/status":
             return self._send(200, bt_status())
+        if u.path == "/api/klines":
+            code, res = klines_api(q)
+            return self._send(code, res)
+        if u.path == "/api/ltf":
+            return self._send(200, {"state": LTF.state, "last_run": LTF.last_run, "error": LTF.error,
+                                    "enabled": bool(load_settings().get("ltf_enabled", True))})
         if u.path == "/api/spot":
             return self._send(200, spot_state())
         if u.path == "/api/git/status":
@@ -1517,6 +1559,7 @@ def main():
     threading.Thread(target=watchdog, daemon=True).start()
     GIT.start()
     threading.Thread(target=spot_auto_loop, daemon=True).start()
+    LTF.start()
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
