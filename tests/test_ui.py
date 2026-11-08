@@ -33,9 +33,9 @@ with open(os.path.join(data_dir, "settings.json"), "w", encoding="utf-8") as f:
 ok = True
 
 
-def check(name, cond):
+def check(name, cond, info=""):
     global ok
-    print(("OK   " if cond else "FAIL ") + name)
+    print(("OK   " if cond else "FAIL ") + name + ("" if cond or not info else f"  {info}"))
     ok = ok and bool(cond)
 
 
@@ -124,6 +124,18 @@ try:
         check("налаштування зберігаються, команда оновлюється", "--approach 5" in pg.locator("#cmdPreview").inner_text())
         check("вибір обсягу 50 млн $ → --min-volume 50", "--min-volume 50" in pg.locator("#cmdPreview").inner_text()
               and pg.input_value("select[name=min_volume]") == "50")
+        st = json.load(urllib.request.urlopen(URL + "/api/status", timeout=5))
+        check("«Зберегти й застосувати»: скринер сам перезапустився з новими параметрами (без «Стоп» → «Старт»)",
+              "перезапущено" in pg.locator("#setMsg").inner_text() and st["running"] and "--min-volume 50" in (st["command"] or "")
+              and "--approach 5" in (st["command"] or ""), (pg.locator("#setMsg").inner_text(), st.get("command")))
+        pid1 = st["pid"]
+        pg.click("input[name=spot_auto]")
+        pg.click("#setForm button[type=submit]")
+        expect(pg.locator("#setMsg")).to_contain_text("працює далі", timeout=10000)
+        check("зміна, що не стосується скринера, — без перезапуску", json.load(urllib.request.urlopen(URL + "/api/status", timeout=5))["pid"] == pid1)
+        pg.click("input[name=spot_auto]")
+        pg.click("#setForm button[type=submit]")
+        expect(pg.locator("#setMsg")).to_contain_text("працює далі", timeout=10000)
         bad = pg.evaluate("""fetch('/api/settings', {method: 'POST', headers: {'Content-Type': 'application/json', 'X-SMC-App': '1'},
                              body: JSON.stringify({settings: {watch: 0, top: 'abc'}})}).then(r => r.json())""")
         check("сервер відхиляє некоректні значення з поясненням", not bad["ok"] and len(bad["errors"]) == 2)

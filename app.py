@@ -39,7 +39,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.5.1"
+APP_VERSION = "1.5.2"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -155,6 +155,11 @@ def results_dir(s):
 
 def screener_path(s):
     return os.path.abspath(os.path.expanduser(s["screener_path"]))
+
+
+def launch_sig(s):
+    """Усе, що впливає на запущений процес скринера: команда + куди йдуть алерти/таблиця."""
+    return [display_command(build_command(s)), tg_chat(s), bool(s.get("sheet_sync"))]
 
 
 def build_command(s):
@@ -284,7 +289,7 @@ class Screener:
             log.close()  # дочірній процес тримає свою копію дескриптора
             self.last_exit = None
             self.state = {"pid": self.proc.pid, "started_at": dt.datetime.now().isoformat(timespec="seconds"),
-                          "command": display_command(cmd), "results_dir": results_dir(s)}
+                          "command": display_command(cmd), "results_dir": results_dir(s), "launch": launch_sig(s)}
             self._save_state()
             return True, "Скринер запущено"
 
@@ -318,6 +323,23 @@ class Screener:
             self.state = {}
             self._save_state()
             return True, "Скринер зупинено"
+
+    def needs_restart(self, s):
+        """Чи працює скринер зі старими параметрами (команда або Telegram/таблиця відрізняються від s)."""
+        with self.lock:
+            if not self.running():
+                return False
+            if self.state.get("launch") is not None:
+                return self.state["launch"] != launch_sig(s)
+            return self.state.get("command") != display_command(build_command(s))
+
+    def restart(self, s):
+        """Застосувати нові налаштування: зупинити й одразу запустити (новий скан почнеться відразу)."""
+        ok, msg = self.stop()
+        if not ok:
+            return False, msg
+        log_line(f"===== {dt.datetime.now():%Y-%m-%d %H:%M:%S} перезапуск: застосовано нові налаштування")
+        return self.start(s)
 
     def status(self):
         with self.lock:
@@ -1408,10 +1430,24 @@ class Handler(BaseHTTPRequestHandler):
             if errors:
                 return self._send(400, {"ok": False, "errors": errors})
             save_settings(new)
-            note = "Збережено." + (" Нові параметри діятимуть після перезапуску скринера." if SCREENER.status()["running"] else "")
-            return self._send(200, {"ok": True, "message": note, "settings": new, "command": display_command(build_command(new))})
+            restarted = False
+            if SCREENER.needs_restart(new):
+                ok, msg = SCREENER.restart(new)
+                if not ok:
+                    return self._send(200, {"ok": True, "settings": new, "command": display_command(build_command(new)),
+                                            "message": f"Збережено, але перезапустити скринер не вдалося: {msg}"})
+                restarted = True
+                note = "Збережено й застосовано: скринер перезапущено з новими параметрами, новий скан уже йде."
+            elif SCREENER.status()["running"]:
+                note = "Збережено й застосовано (скринер працює далі — ці зміни не потребують перезапуску)."
+            else:
+                note = "Збережено. Параметри діятимуть з наступного «Старт»."
+            return self._send(200, {"ok": True, "message": note, "settings": new, "restarted": restarted,
+                                    "command": display_command(build_command(new))})
         if u.path == "/api/settings/reset":
             save_settings(dict(DEFAULTS))
+            if SCREENER.needs_restart(load_settings()):
+                SCREENER.restart(load_settings())
             return self._send(200, {"ok": True, "settings": DEFAULTS})
         if u.path == "/api/selftest":
             return self._send(200, run_selftest(s))
@@ -1426,6 +1462,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"ok": False, "error": str(e)})
             new = dict(s, tg_chat=str(chat), tg_name=name or "", tg_enabled=True)
             save_settings(new)
+            if SCREENER.needs_restart(new):  # щоб алерти скринера одразу йшли в Telegram
+                SCREENER.restart(new)
             run = SCREENER.status()["running"]
             return self._send(200, {"ok": True, "chat": str(chat), "name": name, "bot": bot, "screener_running": run})
         if u.path == "/api/telegram/test":
@@ -1438,7 +1476,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"ok": False, "error": str(e)})
             return self._send(200, {"ok": True})
         if u.path == "/api/telegram/disconnect":
-            save_settings(dict(s, tg_chat="", tg_name=""))
+            new = dict(s, tg_chat="", tg_name="")
+            save_settings(new)
+            if SCREENER.needs_restart(new):
+                SCREENER.restart(new)
             return self._send(200, {"ok": True})
         if u.path == "/api/journal/link_clear":
             code, res = journal_link_clear(s)

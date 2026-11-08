@@ -485,8 +485,11 @@ function formValues() {
 }
 $("#setForm").addEventListener("submit", async e => {
   e.preventDefault();
-  const r = await api("/api/settings", { settings: formValues() });
-  const m = $("#setMsg");
+  const m = $("#setMsg"), btn = $("#btnSaveSet");
+  btn.disabled = true; m.style.color = ""; m.textContent = "Зберігаю…";
+  let r;
+  try { r = await api("/api/settings", { settings: formValues() }); }
+  finally { btn.disabled = false; }
   if (r.ok) {
     const wasLive = liveOn();
     S.settings = r.settings;
@@ -614,6 +617,6 @@ async function tgAction(path, okText) {
   loadSettings();
 }
 $("#tgConnect").addEventListener("click", () => tgAction("/api/telegram/connect",
-  r => `Підключено ✓ Перевір Telegram — там повідомлення від @${r.bot}.` + (r.screener_running ? " Перезапусти скринер («Стоп» → «Старт»)." : "")));
+  r => `Підключено ✓ Перевір Telegram — там повідомлення від @${r.bot}.` + (r.screener_running ? " Скринер уже перезапущено — алерти йдуть у Telegram." : "")));
 $("#tgTest").addEventListener("click", () => tgAction("/api/telegram/test", () => "Тест надіслано ✓ Перевір Telegram."));
-$("#tgOff").addEventListener("click", () => { if (confirm("Відключити Telegram?")) tgAction("/api/telegram/disconnect", () => "Відключено. Перезапусти скринер."); });
+$("#tgOff").addEventListener("click", () => { if (confirm("Відключити Telegram?")) tgAction("/api/telegram/disconnect", () => "Відключено."); });
