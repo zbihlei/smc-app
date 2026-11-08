@@ -51,8 +51,9 @@ function renderSpot() {
   $("#spBody").innerHTML = rows.map(r => {
     const base = r.symbol.replace(/USDT$/, "");
     return `<tr${r.new_today ? ' class="sp-new"' : ""}>
-      <td class="sym"><a href="https://www.tradingview.com/chart/?symbol=BINANCE:${esc(r.symbol)}" target="_blank" rel="noopener">${esc(base)}</a>
-        <a class="muted small" href="https://www.binance.com/en/trade/${esc(base)}_USDT?type=spot" target="_blank" rel="noopener">Binance</a></td>
+      <td class="sym"><a href="https://www.tradingview.com/chart/?symbol=${encodeURIComponent("BINANCE:" + r.symbol)}" target="_blank" rel="noopener">${esc(base)}</a>
+        <a class="muted small" href="https://www.binance.com/en/trade/${encodeURIComponent(base)}_USDT?type=spot" target="_blank" rel="noopener">Binance</a>
+        <button class="linkbtn small" type="button" data-excl="${esc(base)}" title="Більше не показувати цю монету">приховати</button></td>
       <td><span class="tag ${r.kind === "накопичення" ? "green" : "amber"}">${esc(r.kind)}</span></td>
       <td class="sp-why">${esc(r.why)}</td>
       <td class="num">${spPx(r.price)}</td><td class="num nowrap">${spUsd(r.vol_24h)}</td>
@@ -82,7 +83,7 @@ $("#spScan").addEventListener("click", () => spScan(null));
 $("#spForm").addEventListener("submit", ev => {
   ev.preventDefault();
   const params = {};
-  Array.from(ev.target.elements).forEach(el => { if (el.name) params[el.name] = +el.value; });
+  Array.from(ev.target.elements).forEach(el => { if (el.name) params[el.name] = el.name === "exclude" ? el.value : +el.value; });
   spScan(params);
 });
 $("#spReset").addEventListener("click", () => { const d = SPS.data && SPS.data.defaults; if (d) Object.entries(d).forEach(([k, v]) => { const el = $("#spForm").elements[k]; if (el) el.value = v; }); });
@@ -94,3 +95,12 @@ $("#spFilt").addEventListener("click", ev => {
   if (SPS.data) renderSpot();
 });
 $("#spOnlyNew").addEventListener("change", () => SPS.data && renderSpot());
+$("#spBody").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-excl]");
+  if (!b) return;
+  const f = $("#spForm"), cur = f.elements.exclude.value.trim();
+  f.elements.exclude.value = cur ? cur + ", " + b.dataset.excl : b.dataset.excl;
+  b.closest("tr").remove();
+  $("#spCritBox").open = true;
+  spMsg(`${esc(b.dataset.excl)} додано у «Виключити». Натисни «Сканувати з цими критеріями», щоб зберегти.`);
+});

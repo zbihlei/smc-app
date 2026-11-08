@@ -142,6 +142,7 @@ SPOT = {  # символ -> (обсяг 24h, сценарій, днів істо
     "FALUSDT": (4e6, "falling", 50), "PLAUSDT": (3e6, "plain", 200),
     "DEDUSDT": (2e5, "accum", 200),                                              # замалий обсяг
     "USDCUSDT": (7e9, "plain", 300), "BTCUPUSDT": (5e6, "accum", 200),           # стейбл і токен з плечем
+    "NVDABUSDT": (5e6, "accum", 200), "牛来USDT": (4e6, "newl", 60),              # bStock (акція) і монета з ієрогліфами
 }
 
 

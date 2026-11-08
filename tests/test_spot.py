@@ -38,7 +38,11 @@ def check(name, cond, info=""):
 # ================================================================ 1. логіка
 P = SS.clean({"skip_top": 2})
 u = [s for s, _ in SS.universe(BASE, P)]
-check("відбір: без топу, стейблів, токенів з плечем і дрібних монет", sorted(u) == ["ACCUSDT", "FALUSDT", "NEWUSDT", "PLAUSDT", "PMPUSDT"], u)
+check("відбір: без топу, стейблів, токенів з плечем, акцій bStocks і дрібних монет",
+      sorted(u) == ["ACCUSDT", "FALUSDT", "NEWUSDT", "PLAUSDT", "PMPUSDT", "牛来USDT"], u)
+check("«Виключити»: монети з поля не скануються", "牛来USDT" not in [s for s, _ in SS.universe(BASE, SS.clean({"skip_top": 2, "exclude": "牛来, pla"}))]
+      and "PLAUSDT" not in [s for s, _ in SS.universe(BASE, SS.clean({"skip_top": 2, "exclude": "牛来, pla"}))])
+u = [x for x in u if x != "牛来USDT"]
 found = {}
 for s in u:
     for r in SS.analyze(s, SS.klines_1d(BASE, s), P):
@@ -60,12 +64,12 @@ check("суворіший поріг обсягу → накопичення н�
 
 d = tempfile.mkdtemp()
 sc = SS.SpotScanner(d, BASE)
-sc.start({"skip_top": 2})
+sc.start({"skip_top": 2, "exclude": "牛来"})
 while sc.running():
     time.sleep(0.05)
 lat = sc.latest()
 check("скан у фоні: результат у файлі, 2 знахідки, «нова сьогодні»", lat and len(lat["found"]) == 2 and all(r["new_today"] for r in lat["found"]), sc.progress)
-sc.start({"skip_top": 2})
+sc.start({"skip_top": 2, "exclude": "牛来"})
 while sc.running():
     time.sleep(0.05)
 check("повторний скан пам'ятає дату першої появи", all(r["first_seen"] for r in sc.latest()["found"]))
@@ -108,6 +112,13 @@ try:
         pg.click("#spCritBox summary")
         pg.fill("#spForm input[name=skip_top]", "2")
         pg.click("#spForm button[type=submit]")
+        expect(pg.locator("#spBody tr")).to_have_count(3, timeout=30000)
+        href = pg.locator("#spBody tr:has-text('牛来') a").first.get_attribute("href")
+        check("монета з ієрогліфами: посилання закодовані", "%E7%89%9B" in href, href)
+        pg.click("#spBody [data-excl='牛来']")
+        check("«приховати» → у полі «Виключити»", "牛来" in pg.input_value("#spForm input[name=exclude]"))
+        pg.click("#spForm button[type=submit]")
+        expect(pg.locator("#spSt")).to_contain_text("знайдено 2", timeout=30000)
         expect(pg.locator("#spBody tr")).to_have_count(2, timeout=30000)
         check("скан з вкладки: 2 монети, причина простими словами, посилання на TradingView",
               "ACC" in pg.locator("#spBody").inner_text() and "обсяг за 2 тижні" in pg.locator("#spBody").inner_text()
@@ -127,7 +138,8 @@ try:
         r = pg.request.post(URL + "/api/spot/scan", headers={"X-SMC-App": "1"}, data=json.dumps({"params": {"vol_min": 50, "vol_max": 1}}))
         check("некоректні критерії → 400", r.status == 400)
         pg.click(".tab[data-tab=settings]")
-        check("у «Налаштуваннях» — автоскан споту раз на добу (увімкнено)", pg.locator("input[name=spot_auto]").is_checked())
+        expect(pg.locator("input[name=spot_auto]")).to_be_checked(timeout=5000)
+        check("у «Налаштуваннях» — автоскан споту раз на добу (увімкнено)", True)
         pg.click(".tab[data-tab=spot]")
         pg.set_viewport_size({"width": 390, "height": 844})
         pg.wait_for_timeout(300)

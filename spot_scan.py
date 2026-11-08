@@ -29,9 +29,21 @@ STABLES = {"USDC", "FDUSD", "TUSD", "BUSD", "USDP", "DAI", "EUR", "AEUR", "USDE"
            "TRY", "BRL", "ARS", "ZAR", "UAH", "RUB", "IDRT", "BIDR", "BVND", "NGN", "PLN", "RON", "JPY", "MXN", "COP", "CZK"}
 NON_CRYPTO = {"XAU", "XAG", "PAXG", "XAUT"}
 LEVERAGED = ("UP", "DOWN", "BULL", "BEAR")
+# bStocks — токенізовані акції США на споті Binance (тікер акції + «B»: NVDAB, GOOGLB…). Це не крипта — відсіюємо.
+STOCKS = set("""AAPL MSFT NVDA GOOGL GOOG AMZN META TSLA AVGO BRK BRKB NFLX AMD INTC ORCL CRM ADBE CSCO QCOM TXN IBM MU ARM ASML TSM
+SMCI PLTR SNOW SHOP UBER ABNB PYPL SQ XYZ COIN HOOD MSTR CRCL CBRS GME AMC RIVN LCID NIO BABA JD PDD BIDU DIS NKE SBUX MCD KO PEP
+WMT COST TGT HD LOW JPM BAC WFC GS MS C V MA AXP BLK SCHW UNH JNJ PFE MRK LLY ABBV MRNA BMY CVS XOM CVX COP OXY BA LMT RTX GE CAT
+DE F GM T VZ TMUS SPY QQQ IWM DIA VOO VTI GLD SLV TLT ARKK RBLX SPOT ZM DOCU ROKU SNAP PINS U NET CRWD PANW ZS DDOG MDB OKTA TEAM
+NOW INTU WDAY ADSK ANET DELL HPQ HPE SONY TM HMC SAP ACN IONQ RGTI QBTS SOFI AFRM UPST DKNG CVNA CELH ENPH FSLR SEDG MARA RIOT
+CLSK HUT BITF CIFR IREN WULF CORZ BTDR GLXY BMNR SBET OPEN APP RDDT ASTS OKLO SMR NBIS CRWV ALAB AVAV KTOS RKLB LUNR SPCX""".split())
+
+
+def is_bstock(base):
+    return len(base) > 2 and base.endswith("B") and (base[:-1] in STOCKS or base in STOCKS)
 
 DEFAULTS = {
     "skip_top": 50,        # пропустити найпопулярніші (топ-N за обсягом)
+    "exclude": "",         # монети, які не показувати (через кому)
     "vol_min": 1.0,        # мін. обсяг за добу, млн $
     "vol_max": 30.0,       # макс. обсяг за добу, млн $
     # накопичення
@@ -50,6 +62,10 @@ DEFAULTS = {
 def clean(p):
     out = dict(DEFAULTS)
     for k, v in (p or {}).items():
+        if k == "exclude":
+            import re as _re
+            out[k] = ", ".join(dict.fromkeys(x.upper().replace("USDT", "") for x in _re.split(r"[\s,;]+", str(v or "")) if x))
+            continue
         if k in DEFAULTS:
             try:
                 out[k] = type(DEFAULTS[k])(float(v))
@@ -91,11 +107,13 @@ def _get(base, path, params=None, retries=3, sleep=time.sleep):
 def universe(base, P):
     """Спот-пари USDT поза топ-N з обсягом у межах. [(symbol, quote_volume_usd)] за спаданням обсягу."""
     info = _get(base, "/api/v3/exchangeInfo")
+    excl = {x.strip().upper() for x in (P.get("exclude") or "").split(",") if x.strip()}
     ok = set()
     for s in info.get("symbols", []):
         b = s.get("baseAsset", "")
         if (s.get("status") == "TRADING" and s.get("quoteAsset") == "USDT" and s.get("isSpotTradingAllowed", True)
-                and b not in STABLES and b not in NON_CRYPTO and not any(b.endswith(x) and len(b) > len(x) for x in LEVERAGED)):
+                and b not in STABLES and b not in NON_CRYPTO and not any(b.endswith(x) and len(b) > len(x) for x in LEVERAGED)
+                and not is_bstock(b) and b.upper() not in excl):
             ok.add(s["symbol"])
     tick = _get(base, "/api/v3/ticker/24hr")
     vols = sorted(((t["symbol"], float(t.get("quoteVolume") or 0)) for t in tick if t.get("symbol") in ok), key=lambda x: -x[1])
