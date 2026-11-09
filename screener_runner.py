@@ -207,6 +207,104 @@ def report_dropped(mod, out_dir, stamp, rows, rejects):
     return out
 
 
+# ---------------------------------------------------------------- сповіщення Mac: по черзі, без «хору»
+GROUP_FROM = 3     # стільки й більше алертів за один скан — одне зведене сповіщення на Mac
+GAP_S = 1.5        # пауза між сповіщеннями Mac
+
+
+class MacQueue:
+    """Банери, звуки, спливаючі вікна й голос macOS — по одному, а не всі в ту саму секунду.
+    Алерти одного скану (alert_new) збираються в пачку: 1–2 — по черзі, від GROUP_FROM — одне зведене
+    «Нових сигналів: N …» з одним голосовим повідомленням. Telegram від цього не залежить (там кожен окремо)."""
+
+    def __init__(self, mod, mac_notify, say=None, gap=GAP_S):
+        import queue
+        import threading
+        self.mod, self.mac_notify, self.gap = mod, mac_notify, gap
+        self.say = say or self._say
+        self.q = queue.Queue()
+        self.batch = None
+        self.lock = threading.Lock()
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    @staticmethod
+    def _say(text):
+        import subprocess
+        try:
+            subprocess.run(["say", text], timeout=30, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    def begin(self):
+        with self.lock:
+            self.batch = []
+
+    def put(self, title, text, kind="new", speak="", ticker=""):
+        item = (title, text, kind, speak, ticker)
+        with self.lock:
+            if self.batch is not None:
+                self.batch.append(item)
+                return
+        self.q.put(item)
+
+    def flush(self):
+        with self.lock:
+            items, self.batch = self.batch or [], None
+        if len(items) < GROUP_FROM:
+            for it in items:
+                self.q.put(it)
+            return
+        zone = [it for it in items if it[2] == "zone"]
+        names = [it[1].split(" | ")[0].split(": ", 1)[-1] for it in items]   # «EURUSD Long» з «НОВА ПАРА: EURUSD Long | …»
+        shown = ", ".join(names[:8]) + (f" і ще {len(names) - 8}" if len(names) > 8 else "")
+        head = f"Нових сигналів: {len(items)}" + (f" (у зоні: {len(zone)})" if zone else "")
+        speak = f"{len(items)} new signals" + (f", {len(zone)} in zone" if zone else "")
+        self.q.put((items[0][0], f"{head}: {shown}. Деталі — у додатку й Telegram.", "zone" if zone else "new", speak, ""))
+
+    def wait_idle(self, timeout=10):
+        """Для тестів: дочекатися, поки черга спорожніє."""
+        import time
+        end = time.time() + timeout
+        while time.time() < end:
+            if self.q.unfinished_tasks == 0:
+                return True
+            time.sleep(0.02)
+        return False
+
+    def _run(self):
+        import time
+        while True:
+            title, text, kind, speak, ticker = self.q.get()
+            lk = self._lock_other_screener()
+            try:
+                self.mac_notify(title, text, kind, "", ticker)       # банер + звук (+ вікно), без голосу
+                if speak and getattr(self.mod, "ALERT", {}).get("voice"):
+                    self.say(speak)                                   # голос — до кінця, потім наступне
+                time.sleep(self.gap)
+            except Exception:
+                pass
+            finally:
+                if lk is not None:
+                    try:
+                        lk.close()                                    # знімає блокування
+                    except Exception:
+                        pass
+                self.q.task_done()
+
+    @staticmethod
+    def _lock_other_screener():
+        """Крипто- і форекс-скринер — окремі процеси: спільний файл-замок, щоб і вони не говорили одночасно."""
+        try:
+            import fcntl
+            import tempfile
+            f = open(os.path.join(tempfile.gettempdir(), "smc_app_mac_alerts.lock"), "w")
+            fcntl.flock(f, fcntl.LOCK_EX)
+            return f
+        except Exception:
+            return None
+
+
 def install_hooks(mod):
     orig_save_json = mod.save_json
     orig_append_log = mod.append_log
@@ -258,13 +356,24 @@ def install_hooks(mod):
     if orig_notify is not None:
         import tg
         chat = os.environ.get("SMC_TG_CHAT", "").strip()
+        macq = MacQueue(mod, orig_notify)
+        mod._mac_queue = macq
 
         def notify(title, text, kind="new", speak="", ticker=""):
-            orig_notify(title, text, kind, speak, ticker)
+            macq.put(title, text, kind, speak, ticker)      # Mac: по черзі, пачка — одним сповіщенням
             if chat:
-                tg.send_bg(chat, tg.format_alert(title, text, kind, ticker))
+                tg.send_bg(chat, tg.format_alert(title, text, kind, ticker))   # Telegram: кожен алерт окремо
 
         mod.notify = notify
+        orig_alert_new = getattr(mod, "alert_new", None)
+        if orig_alert_new is not None:
+            def alert_new(rows, seen_path):
+                macq.begin()
+                try:
+                    return orig_alert_new(rows, seen_path)
+                finally:
+                    macq.flush()
+            mod.alert_new = alert_new
     if hasattr(mod, "live_wait"):
         mod.live_wait = make_live_wait(mod)
 
