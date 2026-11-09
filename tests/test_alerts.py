@@ -140,5 +140,12 @@ check("повний скан: «у зоні» по зоні, де вже був 
 scr.alert_new([dict(row, status="у зоні (1-й дотик)", rank=0, zone_low=0.0450, zone_high=0.0455)], seen)
 check("нова зона тієї ж монети — алерт приходить", len(got) == 1 and "WLFIUSDT" in got[0], got)
 
+# ---- 7. «Сканувати зараз»: прапорець від додатка перериває очікування між сканами
+open(os.path.join(out, R.SCAN_NOW_FILE), "w").close()
+t0 = time.time()
+lw(types.SimpleNamespace(watch=1, price_check=15, out=out), [], seen)
+check("прапорець scan_now.flag → скан одразу (не через 1 хв), прапорець прибрано",
+      time.time() - t0 < 4 and not os.path.exists(os.path.join(out, R.SCAN_NOW_FILE)), time.time() - t0)
+
 print("\nПІДСУМОК: " + ("усі перевірки пройдено" if ok else "Є ПОМИЛКИ"))
 sys.exit(0 if ok else 1)

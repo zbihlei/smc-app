@@ -108,6 +108,10 @@ def fired_add(out_dir, keys):
         pass
 
 
+SCAN_NOW_FILE = "scan_now.flag"   # додаток створює цей файл — скринер сканує одразу
+FLAG_POLL_S = 2.0
+
+
 def make_live_wait(mod):
     """Як live_wait скринера, але очікує короткими кроками й дивиться на реальний годинник:
     сон Mac -> скан одразу після пробудження; збій скану -> повтор через RETRY_MIN хв."""
@@ -122,11 +126,13 @@ def make_live_wait(mod):
         end = time.time() + total
         out_dir = getattr(a, "out", None) or os.path.dirname(seen_path) or "."
         fired = set(fired_load(out_dir))   # зони, по яких алерт уже був (і в минулих сканах)
+        flag = os.path.join(out_dir, SCAN_NOW_FILE)
+        next_px = time.time() + step
         while True:
             left = end - time.time()
             if left <= 0:
                 return
-            want = min(step, left)
+            want = min(FLAG_POLL_S, left, max(0.05, next_px - time.time())) if live else min(FLAG_POLL_S, left)
             t0 = time.time()
             time.sleep(want)
             gap = time.time() - t0 - want
@@ -134,8 +140,16 @@ def make_live_wait(mod):
                 log(f"Mac прокинувся після сну (≈{gap / 60:.0f} хв) — сканую одразу")
                 time.sleep(WAKE_DELAY_S)
                 return
-            if not live:
+            if os.path.exists(flag):          # кнопка «Сканувати зараз» у додатку
+                try:
+                    os.remove(flag)
+                except OSError:
+                    pass
+                log("скан за запитом з додатка")
+                return
+            if not live or time.time() < next_px:
                 continue
+            next_px = time.time() + step
             try:
                 prices = mod.fetch_prices()
             except Exception:

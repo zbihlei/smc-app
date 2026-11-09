@@ -50,11 +50,18 @@
         <button class="chip" data-d="Short">Short</button>
       </div>
       <input id="search" class="search" type="search" placeholder="Пошук монети" autocomplete="off">
+      <div class="chips" id="viewChips">
+        <button class="chip on" data-v="tiles">Блоки</button>
+        <button class="chip" data-v="table">Таблиця</button>
+      </div>
       <span class="spacer"></span>
+      <button class="btn small" id="btnScanNow" type="button" title="Не чекати 30 хв — сканувати зараз">Сканувати зараз</button>
+      <button class="btn small" id="btnClear" type="button" title="Прибрати всі пари зі списку до наступного скану">Очистити список</button>
       <span id="dataStamp" class="muted"></span>
     </div>
+    <div id="tiles" class="tiles"></div>
 
-    <div class="table-wrap">
+    <div class="table-wrap" id="tblWrap">
       <table id="tbl">
         <thead><tr>
           <th>№</th><th>Символ</th><th>Напрям</th><th>Статус</th><th>Дія</th><th title="Сума підтверджень для сортування, не ймовірність">Бали</th>

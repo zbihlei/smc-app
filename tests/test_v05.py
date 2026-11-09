@@ -58,12 +58,13 @@ class FakeClock:
 
 lines = []
 R.log = lambda m: lines.append(m)
+SEEN = os.path.join(tempfile.mkdtemp(), "seen.json")   # live_fired.json пишеться поруч — не в робочу папку
 a = types.SimpleNamespace(watch=30, price_check=15)
 
 fc = FakeClock()
 R.time = fc
 R.STATE["scan_failed"] = False
-mod.live_wait(a, [], "seen.json")
+mod.live_wait(a, [], SEEN)
 check("без сну: чекає повні 30 хв короткими кроками", abs(sum(fc.slept) - 1800) < 1e-6 and max(fc.slept) <= 15)
 
 fc = FakeClock()
@@ -71,7 +72,7 @@ fc.jump_at = (3, 6 * 3600)  # на 3-му кроці Mac проспав 6 год
 R.time = fc
 lines.clear()
 t0 = fc.now
-mod.live_wait(a, [], "seen.json")
+mod.live_wait(a, [], SEEN)
 check("сон 6 год: одразу після пробудження вихід на скан (з паузою 20 с на мережу)",
       len(fc.slept) == 4 and fc.slept[-1] == R.WAKE_DELAY_S and any("прокинувся" in x for x in lines), (fc.slept, lines))
 
@@ -79,7 +80,7 @@ fc = FakeClock()
 fc.jump_at = (2, 60)  # затримка 1 хв (не сон) — не вважається пробудженням
 R.time = fc
 lines.clear()
-mod.live_wait(a, [], "seen.json")
+mod.live_wait(a, [], SEEN)
 check("коротка затримка (< 90 с) — не пробудження, чекає до кінця", not any("прокинувся" in x for x in lines))
 
 orig = R.STATE.copy()
@@ -87,7 +88,7 @@ R.STATE["scan_failed"] = True
 fc = FakeClock()
 R.time = fc
 lines.clear()
-mod.live_wait(a, [], "seen.json")
+mod.live_wait(a, [], SEEN)
 check("після збою скану повтор через 2 хв, а не 30", abs(sum(fc.slept) - 120) < 1e-6 and any("повтор через 2 хв" in x for x in lines))
 R.STATE.update(orig)
 
@@ -100,7 +101,7 @@ refreshed = []
 fc = FakeClock()
 R.time = fc
 row = dict(symbol="AAAUSDT", dir="Long", zone_low=100.0, zone_high=102.0)
-mod.live_wait(a, [row], "seen.json", refresh=lambda: refreshed.append(1))
+mod.live_wait(a, [row], SEEN, refresh=lambda: refreshed.append(1))
 check("жива перевірка ціни кожні 15 с і алерт «ціна в зоні» працюють як раніше",
       len(calls) == 120 and fired == [("AAAUSDT", 101.0)] and refreshed == [1] and row["rank"] == 0)
 mod.fetch_prices, mod.live_touches, mod.fire_live = mod_fetch, mod_touch, mod_fire

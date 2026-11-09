@@ -223,7 +223,8 @@ async function pollResults(force) {
     S.mtime = r.mtime;
     const data = r.data || {};
     S.market = data.market || "futures";
-    S.rows = (data.candidates || []).map((x, i) => Object.assign({}, x, { idx: i, rank: rankOf(x) }));
+    S.rows = (data.candidates || []).map((x, i) => Object.assign({}, x, { idx: i, rank: rankOf(x), hot: Number(x.score) >= HOT }));
+    S.rows.sort((a, b) => (b.hot - a.hot) || (a.idx - b.idx));   // сильні сетапи (бали ≥ HOT) — угорі
     renderAll();
   } catch (e) { /* статус покаже проблему зі зв'язком */ }
 }
@@ -279,12 +280,13 @@ function renderStale() {
 }
 
 function renderTable() {
+  renderTiles();
   const rows = visibleRows();
   const tb = $("#tbody");
   tb.innerHTML = rows.map(r => {
     const fib = (r.fib_ok ? "так " : "ні ") + (r.fib != null ? `(${fix(r.fib, 2)})` : "");
     const flags = (r.flags || []).join("; ");
-    return `<tr class="s${r.rank}" data-i="${r.idx}">
+    return `<tr class="s${r.rank}${r.hot ? " hot" : ""}" data-i="${r.idx}">
       <td class="num">${r.idx + 1}</td>
       <td><a class="sym" href="${tvLink(r.symbol)}" target="_blank" rel="noopener" title="Відкрити в TradingView">${esc(r.symbol)}</a></td>
       <td class="dir-${esc(r.dir)}">${esc(r.dir)}${r.zone_type === "брейкер" ? ' <span class="tag amber" title="брейкер-блок: пробитий ордерблок протилежного напрямку">брейкер</span>' : ""}</td>
@@ -313,6 +315,51 @@ function renderTable() {
     empty.classList.remove("hidden");
   } else empty.classList.add("hidden");
 }
+
+// ---------------------------------------------------------------- блоки (за замовчуванням) / таблиця
+const HOT = 2;   // бали, від яких сетап виділяється рамкою й іде вгору списку
+try { S.view = localStorage.getItem("smc_view") === "table" ? "table" : "tiles"; } catch (e) { S.view = "tiles"; }
+function renderTiles() {
+  const rows = visibleRows();
+  $("#tiles").innerHTML = rows.map(r => {
+    const warn = (r.flags || []).length ? `<span class="t-warn" title="${esc((r.flags || []).join("; "))}">⚠ ${(r.flags || []).length}</span>` : "";
+    return `<div class="tile s${r.rank}${r.hot ? " hot" : ""}" data-i="${r.idx}">
+      <div class="t-top"><a class="sym" href="${tvLink(r.symbol)}" target="_blank" rel="noopener">${esc(r.symbol.replace(/USDT$/, ""))}</a>
+        <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.hot ? '<span class="t-hot" title="сильний сетап">★</span>' : ""}</div>
+      <div class="t-st act${r.rank}">${esc(r.rank === 0 ? "у зоні" : r.status)}${r.zone_type === "брейкер" ? ' · <span class="tag amber">брейкер</span>' : ""}</div>
+      <div class="t-lv"><span>вхід</span><b>${fmt(r.entry)}</b><span>стоп</span><b>${fmt(r.stop)}</b><span>ціль</span><b>${fmt(r.target)}</b></div>
+      <div class="t-ft"><b>R:R ${fix(r.rr, 1)}</b><span>бали ${esc(r.score)}</span><span>${r.rank === 0 ? "" : fix(r.dist, 1) + "%"}</span>${warn}</div>
+    </div>`;
+  }).join("");
+}
+function applyView() {
+  $("#tiles").classList.toggle("hidden", S.view !== "tiles");
+  $("#tblWrap").classList.toggle("hidden", S.view !== "table");
+  $$("#viewChips .chip").forEach(b => b.classList.toggle("on", b.dataset.v === S.view));
+}
+$("#viewChips").addEventListener("click", e => {
+  const b = e.target.closest("[data-v]");
+  if (!b) return;
+  S.view = b.dataset.v;
+  try { localStorage.setItem("smc_view", S.view); } catch (err) { /* */ }
+  applyView();
+});
+$("#tiles").addEventListener("click", e => {
+  if (e.target.closest("a")) return;
+  const t = e.target.closest(".tile[data-i]");
+  if (t) jumpTo(+t.dataset.i);
+});
+applyView();
+$("#btnScanNow").addEventListener("click", async () => {
+  const r = await api("/api/scan_now" + mkq("?"), {}).catch(e => ({ message: String(e) }));
+  showMsg(r.message || "Готово", !r._ok);
+});
+$("#btnClear").addEventListener("click", async () => {
+  if (!confirm("Прибрати всі пари зі списку? Наступний скан знову покаже ті, що ще актуальні.")) return;
+  const r = await api("/api/clear" + mkq("?"), {}).catch(e => ({ message: String(e) }));
+  showMsg(r.message || "Готово", !r._ok);
+  pollResults(true);
+});
 
 $("#tbody").addEventListener("click", e => {
   if (e.target.closest("a")) return;
@@ -383,7 +430,7 @@ function renderCharts() {
     const extra = (r.sweep ? " | " + esc(r.sweep) : "") + (r.volume && r.volume !== "-" ? " | обсяг: " + esc(r.volume) : "");
     const warn = (r.flags || []).length ? ` | <b class="warnings">${esc(r.flags.join("; "))}</b>` : "";
     const fk = foldKey(r);
-    return `<div class="card s${r.rank}${FOLD.has(fk) ? " folded" : ""}" id="c${r.idx}" data-fk="${esc(fk)}">
+    return `<div class="card s${r.rank}${r.hot ? " hot" : ""}${FOLD.has(fk) ? " folded" : ""}" id="c${r.idx}" data-fk="${esc(fk)}">
       <div class="hd"><button type="button" class="cfold" title="Згорнути / розгорнути графіки">${FOLD.has(fk) ? "▸" : "▾"}</button><b>${r.idx + 1}. ${esc(r.symbol)}</b> <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.zone_type === "брейкер" ? ' <span class="tag amber">брейкер</span>' : ""}
         | ${esc(r.status)} | вхід ${fmt(r.entry)} · стоп ${fmt(r.stop)} · ціль ${fmt(r.target)} | <b>R:R ${fix(r.rr, 1)}</b>${extra}${warn}
         | <a href="${tvLink(r.symbol)}" target="_blank" rel="noopener">TradingView</a></div>

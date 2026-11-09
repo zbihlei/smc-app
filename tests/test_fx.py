@@ -176,7 +176,7 @@ try:
               and pg.inner_text("#pillText") == "Форекс: зупинено")
         pg.click("#btnRun")
         expect(pg.locator("#pillText")).to_have_text("Форекс: працює", timeout=15000)
-        expect(pg.locator("#tbody tr").first).to_be_visible(timeout=60000)
+        expect(pg.locator("#tiles .tile").first).to_be_visible(timeout=60000)
         n = pg.locator("#tbody tr").count()
         check("форекс-скринер запущено, сетапи у таблиці", n > 0, n)
         href = pg.locator("#tbody tr a.sym").first.get_attribute("href")

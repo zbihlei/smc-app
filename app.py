@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.6.5"
+APP_VERSION = "1.7"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -1557,6 +1557,31 @@ class Handler(BaseHTTPRequestHandler):
             if ok and mk == "fx":
                 msg = "Форекс-скринер запущено"
             return self._send(200 if ok else 409, {"ok": ok, "message": msg})
+        if u.path == "/api/scan_now":   # кнопка «Сканувати зараз»: скринер побачить файл за ≤ 2 с і сканує одразу
+            if not scr.status()["running"]:
+                return self._send(409, {"ok": False, "message": "Скринер не запущено — натисни «Старт» (перший скан почнеться одразу)"})
+            try:
+                with open(os.path.join(scr.out_fn(s), "scan_now.flag"), "w") as f:
+                    f.write(dt.datetime.now().isoformat())
+            except OSError as e:
+                return self._send(500, {"ok": False, "message": f"Не вдалося: {e}"})
+            return self._send(200, {"ok": True, "message": "Скан почнеться за кілька секунд (≈1–2 хв на весь список)"})
+        if u.path == "/api/clear":      # «Очистити список»: до наступного скану список порожній
+            p = os.path.join(scr.out_fn(s), "latest_app.json")
+            try:
+                with open(p, encoding="utf-8") as f:
+                    d = json.load(f)
+            except (OSError, ValueError):
+                d = {}
+            d.update(candidates=[], count=0, cleared_at=dt.datetime.now().isoformat(timespec="seconds"))
+            try:
+                tmp = p + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(d, f, ensure_ascii=False)
+                os.replace(tmp, p)
+            except OSError as e:
+                return self._send(500, {"ok": False, "message": f"Не вдалося: {e}"})
+            return self._send(200, {"ok": True, "message": "Список очищено. Наступний скан знову покаже пари, які ще актуальні."})
         if u.path == "/api/stop":
             ok, msg = scr.stop()
             if ok and mk == "fx":
