@@ -39,7 +39,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.5.2"
+APP_VERSION = "1.5.3"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -1009,6 +1009,17 @@ GIT = gitsync.GitSync(os.environ.get("SMC_GIT_DIR") or APP_DIR, os.path.join(DAT
 
 
 # ---------------------------------------------------------------- 4h + 1h + 15m: лайв-графіки й уточнення входу на 15m
+def ltf_opts(s):
+    """Правила стопа/R:R для уточнення 15m — ті самі, що в скринера: мін. стоп × середньої свічки і мін. R:R
+    (--min-rr у «Додаткових параметрах», інакше 3)."""
+    m = re.search(r"--min-rr[ =]([0-9.]+)", s.get("extra_args") or "")
+    try:
+        rr = float(m.group(1)) if m else 3.0
+    except ValueError:
+        rr = 3.0
+    return {"min_stop_atr": float(s.get("min_stop_atr") or 0), "min_rr": rr}
+
+
 def ltf_rows():
     """Сигнали «у списку» з останнього скану (не старші за 3 години — інакше скринер, імовірно, не працює)."""
     if not load_settings().get("ltf_enabled", True):
@@ -1021,6 +1032,7 @@ def ltf_rows():
 
 LTF = ltf.LtfWatcher(DATA_DIR, ltf_rows, lambda t, x: notify_mac(t, x),
                      get_tol=lambda: float(load_settings().get("entry_tol") or 0),
+                     get_opts=lambda: ltf_opts(load_settings()),
                      interval=float(os.environ.get("SMC_LTF_INTERVAL") or 60))
 
 

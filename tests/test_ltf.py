@@ -52,26 +52,47 @@ MISS = CHOCH + [113, 116, 119, 121]                            # одразу д
 STOPPED = FILL + [99, 96, 95.2]                                # після входу — нижче стопа 15m
 SIG = {"symbol": "TESTUSDT", "dir": "Long", "zone_low": 95.0, "zone_high": 100.0, "stop": 94.0, "target": 120.0}
 
-r = ltf.refine(series(DOWN), SIG, 25)
+
+def REF(c, sig, tol=25, **k):
+    """Логіка структури — без правила мінімального стопа (його перевіряємо окремо нижче)."""
+    return ltf.refine(c, sig, tol, **dict({"min_stop_atr": 0}, **k))
+
+
+r = REF(series(DOWN), SIG, 25)
 check("ціна ще над зоною → «чекаю зону»", r["status"] == "wait_zone", r)
-r = ltf.refine(series(INTO), SIG, 25)
+r = REF(series(INTO), SIG, 25)
 check("у зоні без зламу → «чекаю злам 15m», рівень зламу = останній свінг-максимум 109.5",
       r["status"] == "wait_choch" and r["trigger"] == 109.5 and r["ext"] == 95.5, r)
-r = ltf.refine(series(CHOCH), SIG, 25)
+r = REF(series(CHOCH), SIG, 25)
 check("злам 15m: лімітка від 15m-ордерблока (середина 96.5 + 25% висоти = 97.0)",
       r["status"] == "choch" and abs(r["entry"] - 97.0) < 1e-9 and (r["ob_low"], r["ob_high"]) == (95.5, 97.5), r)
 check("стоп 15m — за екстремумом 95.5 з буфером 0.05%, R:R до цілі 4h", abs(r["stop"] - 95.5 * 0.9995) < 1e-9
       and abs(r["rr"] - round(23 / (97 - 95.5 * 0.9995), 2)) < 1e-9 and r["target"] == 120.0, r)
 check("стоп 15m тісніший за стоп 4h → R:R вищий, ніж від середини зони 4h", r["rr"] > (120 - 97.5) / (97.5 - 94))
-r0 = ltf.refine(series(CHOCH), SIG, 0)
+r0 = REF(series(CHOCH), SIG, 0)
 check("без допуску — лімітка рівно в середині 15m-ордерблока", abs(r0["entry"] - 96.5) < 1e-9, r0)
-r = ltf.refine(series(FILL), SIG, 25)
+# --- стоп і ціль «за графіком»: стоп не ближче за 0.6× середньої 15m-свічки, ціль 4h не підганяється
+avg = sum(x[2] - x[3] for x in series(CHOCH)) / len(series(CHOCH))
+r = ltf.refine(series(CHOCH), SIG, 25)
+check("стоп 15m ближче за 0.6× середньої свічки → відсунуто до 0.6× (за замовчуванням, як на 4h)",
+      r["status"] == "choch" and r["stop_widened"] and abs(r["stop"] - (97.0 - 0.6 * avg)) < 1e-9 and "відсунуто" in r["why"], r)
+check("R:R рахується від лімітки до тієї самої цілі 4h (ціль не змінено)", r["target"] == 120.0
+      and abs(r["rr"] - round(23 / (0.6 * avg), 2)) < 1e-9 and r["rr"] < REF(series(CHOCH), SIG)["rr"], r)
+r = ltf.refine(series(CHOCH), SIG, 25, min_stop_atr=0.3)
+check("стоп за екстремумом уже далі за мінімум → лишається за графіком", not r["stop_widened"] and abs(r["stop"] - 95.5 * 0.9995) < 1e-9, r)
+r = ltf.refine(series(CHOCH), dict(SIG, target=101.0), 25)
+check("ціль за графіком близько → R:R < 3 → «пропуск», без лімітки в статусі й без підгонки цілі",
+      r["status"] == "rr_low" and r["target"] == 101.0 and "ціль не підганяю" in r["why"], r)
+r = ltf.refine(series(CHOCH), SIG, 25, min_stop_atr=2.0, min_rr=5)
+check("мін. R:R із налаштувань (напр. 5): стоп 2× свічки → R:R 4.1 → пропуск", r["status"] == "rr_low" and 4 < r["rr"] < 5, r)
+
+r = REF(series(FILL), SIG, 25)
 check("відкат до лімітки → «вхід 15m відбувся»", r["status"] == "filled" and r.get("fill_t"), r)
-r = ltf.refine(series(MISS), SIG, 25)
+r = REF(series(MISS), SIG, 25)
 check("ціль без відкату → «ціль без входу 15m»", r["status"] == "missed", r)
-r = ltf.refine(series(STOPPED), SIG, 25)
+r = REF(series(STOPPED), SIG, 25)
 check("після входу ціна нижче стопа 15m → «сценарій зламано»", r["status"] == "broken", r)
-r = ltf.refine(series(INTO[:-3] + [93, 96, 98]), SIG, 25)
+r = REF(series(INTO[:-3] + [93, 96, 98]), SIG, 25)
 check("ціна пробила стоп 4h → «сценарій зламано» (без входу)", r["status"] == "broken" and "4h" in r["why"], r)
 
 
@@ -80,11 +101,11 @@ def mirror(c):
 
 
 SIGS = {"symbol": "TESTUSDT", "dir": "Short", "zone_low": 100.0, "zone_high": 105.0, "stop": 106.0, "target": 80.0}
-r = ltf.refine(mirror(series(CHOCH)), SIGS, 25)
+r = REF(mirror(series(CHOCH)), SIGS, 25)
 check("шорт (дзеркально): злам 15m, лімітка 103.0, стоп за максимумом 104.5", r["status"] == "choch" and abs(r["entry"] - 103.0) < 1e-9
       and abs(r["stop"] - 104.5 * 1.0005) < 1e-9, r)
-check("шорт: «чекаю злам» і «вхід» дзеркально", ltf.refine(mirror(series(INTO)), SIGS, 25)["status"] == "wait_choch"
-      and ltf.refine(mirror(series(FILL)), SIGS, 25)["status"] == "filled")
+check("шорт: «чекаю злам» і «вхід» дзеркально", REF(mirror(series(INTO)), SIGS, 25)["status"] == "wait_choch"
+      and REF(mirror(series(FILL)), SIGS, 25)["status"] == "filled")
 
 up = series([100 + i + (3 if i % 6 == 3 else 0) for i in range(40)])
 check("структура 1h: зростання → BOS угору; падіння → униз", ltf.structure(up, 2) == 1 and ltf.structure(mirror(up), 2) == -1)
@@ -104,6 +125,12 @@ try:
           and st[ltf.sig_key(SIG)]["ctx_1h"] == 1)
     ltf.LtfWatcher(d, lambda: [dict(SIG)], lambda t, x: alerts.append((t, x)), get_tol=lambda: 25).run_once()
     check("після перезапуску додатка той самий злам не сповіщається вдруге", len(alerts) == 1, alerts)
+    w2 = ltf.LtfWatcher(tempfile.mkdtemp(), lambda: [dict(SIG, target=101.0)], lambda t, x: alerts.append((t, x)), get_tol=lambda: 25)
+    st2 = w2.run_once()
+    check("R:R замалий → алерту немає, статус «пропуск»", len(alerts) == 1 and list(st2.values())[0]["status"] == "rr_low", alerts)
+    w3 = ltf.LtfWatcher(tempfile.mkdtemp(), lambda: [dict(SIG)], lambda t, x: None, get_tol=lambda: 25,
+                        get_opts=lambda: {"min_stop_atr": 0, "min_rr": 3})
+    check("правила стопа/R:R беруться з налаштувань (get_opts)", not list(w3.run_once().values())[0]["stop_widened"])
     ltf.fetch_klines = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("HTTP 451"))
     st = w.run_once()
     check("Binance недоступний → статус «немає даних», без падіння", st[ltf.sig_key(SIG)]["status"] == "error")

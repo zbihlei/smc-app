@@ -186,9 +186,9 @@ function lvRenderLtf(i) {
       : "15m: уточнення ще не пораховано (рахується раз на хвилину для свіжого скану з додатка)") : "15m: рахую уточнення…"}</span>`;
     return;
   }
-  const cls = { choch: "ltf-go", filled: "ltf-go", broken: "ltf-bad", missed: "ltf-bad", error: "ltf-bad" }[L.status] || "";
+  const cls = { choch: "ltf-go", filled: "ltf-go", broken: "ltf-bad", missed: "ltf-bad", error: "ltf-bad", rr_low: "ltf-bad" }[L.status] || "";
   el.innerHTML = `<b class="${cls}">15m: ${esc(L.status_txt || L.status)}</b>` + (L.why ? ` — ${esc(L.why)}` : "")
-    + (L.entry != null ? ` · <b>лімітка ${fmt(L.entry)} · стоп ${fmt(L.stop)} · R:R ${fix(L.rr, 1)}</b>` : "");
+    + (L.entry != null && L.status !== "rr_low" ? ` · <b>лімітка ${fmt(L.entry)} · стоп ${fmt(L.stop)} · R:R ${fix(L.rr, 1)}</b>` : "");
   if (m.charts["15m"]) m.charts["15m"].setLtf(L);
 }
 

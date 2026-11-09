@@ -92,7 +92,7 @@ def structure(c, n=3):
     return d
 
 
-def refine(c15, sig, tol_pct=0.0, buffer_pct=0.05, n=2):
+def refine(c15, sig, tol_pct=0.0, buffer_pct=0.05, n=2, min_stop_atr=0.6, min_rr=3.0):
     """c15 — ЗАКРИТІ свічки 15m [[t,o,h,l,c,...]], sig — сигнал скринера (dir, zone_low, zone_high, stop, target).
     Повертає dict зі статусом і рівнями (див. опис модуля)."""
     d = 1 if sig["dir"] == "Long" else -1
@@ -137,11 +137,25 @@ def refine(c15, sig, tol_pct=0.0, buffer_pct=0.05, n=2):
     l15, h15 = c15[ob][3], c15[ob][2]
     mid = (l15 + h15) / 2
     entry = mid + d * max(0.0, min(50.0, tol_pct)) / 100 * (h15 - l15)
+    # стоп за графіком: за екстремумом 15m з буфером; але не ближче за min_stop_atr × середньої 15m-свічки
+    # (те саме правило, що на 4h: інакше стоп вибиває шум і R:R виходить нереальним)
     stop = ext * (1 - d * buffer_pct / 100)
+    w = c15[max(0, k + 1 - 50):k + 1]
+    avg_rng = sum(x[2] - x[3] for x in w) / len(w)
+    widened = False
+    if min_stop_atr and abs(entry - stop) < min_stop_atr * avg_rng:
+        stop = entry - d * min_stop_atr * avg_rng
+        widened = True
     risk = abs(entry - stop)
-    rr = abs(TG - entry) / risk if risk > 0 else 0.0
+    # ціль — та сама, що за графіком 4h (найближчий свінг); її НЕ підганяємо під R:R
+    rr = (TG - entry) * d / risk if risk > 0 else 0.0
+    note = f" (стоп відсунуто до {min_stop_atr:g}× середньої 15m-свічки)" if widened else ""
     out.update(status="choch", choch_t=c15[k][0], ob_low=l15, ob_high=h15, ob_t=c15[ob][0], entry=entry, stop=stop, target=TG,
-               rr=round(rr, 2), why=f"злам 15m: лімітка {entry:g}, стоп {stop:g}, R:R {rr:.1f}")
+               rr=round(rr, 2), stop_widened=widened, avg_range=avg_rng,
+               why=f"злам 15m: лімітка {entry:g}, стоп {stop:g}{note}, R:R {rr:.1f}")
+    if rr < min_rr:
+        out.update(status="rr_low", why=f"злам 15m є, але R:R {rr:.1f} < {min_rr:g} до цілі за графіком{note} — пропуск (ціль не підганяю)")
+        return out
     for j in range(k + 1, len(c15)):
         hit_entry = c15[j][3] <= entry if d == 1 else c15[j][2] >= entry
         hit_target = c15[j][2] >= TG if d == 1 else c15[j][3] <= TG
@@ -159,7 +173,8 @@ def refine(c15, sig, tol_pct=0.0, buffer_pct=0.05, n=2):
 
 
 STATUS_TXT = {"wait_zone": "ціна ще не в зоні 4h", "wait_choch": "у зоні — чекаю злам 15m", "choch": "злам 15m — лімітка",
-              "filled": "вхід 15m відбувся", "missed": "ціль без входу 15m", "broken": "сценарій зламано"}
+              "filled": "вхід 15m відбувся", "missed": "ціль без входу 15m", "broken": "сценарій зламано",
+              "rr_low": "злам 15m, але R:R замалий — пропуск"}
 
 
 def sig_key(r):
@@ -169,8 +184,8 @@ def sig_key(r):
 class LtfWatcher:
     """Раз на хвилину: для кожного сигналу «у списку» — уточнення 15m і контекст 1h; алерт на перехід у «choch»."""
 
-    def __init__(self, data_dir, get_rows, notify, get_tol=lambda: 0.0, base=None, interval=60):
-        self.data_dir, self.get_rows, self.notify, self.get_tol = data_dir, get_rows, notify, get_tol
+    def __init__(self, data_dir, get_rows, notify, get_tol=lambda: 0.0, base=None, interval=60, get_opts=lambda: {}):
+        self.data_dir, self.get_rows, self.notify, self.get_tol, self.get_opts = data_dir, get_rows, notify, get_tol, get_opts
         self.base, self.interval = base, interval
         self.state = {}
         self.seen_path = os.path.join(data_dir, "ltf_seen.json")
@@ -190,7 +205,7 @@ class LtfWatcher:
                 key = sig_key(r)
                 c15 = [x for x in fetch_klines(r["symbol"], "15m", 200, self.base) if x[6]]
                 c1h = [x for x in fetch_klines(r["symbol"], "1h", 120, self.base) if x[6]]
-                res = refine(c15, r, self.get_tol())
+                res = refine(c15, r, self.get_tol(), **(self.get_opts() or {}))
                 res["ctx_1h"] = structure(c1h, 3)
                 res["status_txt"] = STATUS_TXT.get(res["status"], res["status"])
                 new_state[key] = res
