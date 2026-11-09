@@ -74,6 +74,40 @@ def log(msg):
     print(f"[{dt.datetime.now():%H:%M}] [додаток] {msg}", flush=True)
 
 
+# ---------------------------------------------------------------- «ціна в зоні»: один алерт на зону
+FIRED_FILE = "live_fired.json"
+FIRED_DAYS = 7
+FIRED = {"path": None, "data": {}}
+
+
+def fired_load(out_dir):
+    """Зони, по яких уже був живий алерт «ЦІНА В ЗОНІ» (ключ: монета|напрям|низ зони -> час). Між сканами
+    й перезапусками — щоб ціна, що «тремтить» біля краю зони, не давала той самий алерт знову й знову."""
+    path = os.path.join(out_dir, FIRED_FILE)
+    if FIRED["path"] != path:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        cut = time.time() - FIRED_DAYS * 86400
+        FIRED.update(path=path, data={k: v for k, v in data.items() if isinstance(v, (int, float)) and v >= cut})
+    return FIRED["data"]
+
+
+def fired_add(out_dir, keys):
+    data = fired_load(out_dir)
+    for k in keys:
+        data[k] = time.time()
+    try:
+        tmp = FIRED["path"] + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, FIRED["path"])
+    except OSError:
+        pass
+
+
 def make_live_wait(mod):
     """Як live_wait скринера, але очікує короткими кроками й дивиться на реальний годинник:
     сон Mac -> скан одразу після пробудження; збій скану -> повтор через RETRY_MIN хв."""
@@ -86,7 +120,8 @@ def make_live_wait(mod):
         live = pc > 0 and bool(live_rows)
         step = pc if live else IDLE_STEP_S
         end = time.time() + total
-        fired = set()
+        out_dir = getattr(a, "out", None) or os.path.dirname(seen_path) or "."
+        fired = set(fired_load(out_dir))   # зони, по яких алерт уже був (і в минулих сканах)
         while True:
             left = end - time.time()
             if left <= 0:
@@ -106,6 +141,8 @@ def make_live_wait(mod):
             except Exception:
                 continue  # тимчасова помилка мережі: спробуємо на наступному кроці
             touched = mod.live_touches(live_rows, prices, fired)
+            if touched:
+                fired_add(out_dir, [mod.live_key(r) for r, _ in touched])
             for r, px in touched:
                 mod.fire_live(a, r, px, seen_path, dt.datetime.now().strftime("%H:%M"))
                 r.update(status="у зоні (1-й дотик)", rank=0, price=px, dist=0.0)
@@ -305,6 +342,26 @@ class MacQueue:
             return None
 
 
+def suppress_repeat_zone(mod, rows, seen_path):
+    """Повний скан після живого алерту: якщо по зоні вже був «ЦІНА В ЗОНІ», не повторювати його (позначаємо в seen.json,
+    що скринер уже бачив цей статус). Нові пари й нові зони сповіщаються як раніше."""
+    if not hasattr(mod, "live_key"):
+        return
+    fired = fired_load(os.path.dirname(seen_path) or ".")
+    hit = [r for r in rows if isinstance(r, dict) and r.get("rank") == 0 and mod.live_key(r) in fired]
+    if not hit:
+        return
+    try:
+        with open(seen_path, encoding="utf-8") as f:
+            seen = json.load(f)
+    except Exception:
+        seen = {}
+    for r in hit:
+        seen[mod.live_key(r)] = r["status"]
+    with open(seen_path, "w", encoding="utf-8") as f:
+        json.dump(seen, f)
+
+
 def install_hooks(mod):
     orig_save_json = mod.save_json
     orig_append_log = mod.append_log
@@ -370,7 +427,12 @@ def install_hooks(mod):
             def alert_new(rows, seen_path):
                 macq.begin()
                 try:
-                    return orig_alert_new(rows, seen_path)
+                    suppress_repeat_zone(mod, rows, seen_path)
+                    n = orig_alert_new(rows, seen_path)
+                    zone = [mod.live_key(r) for r in rows if isinstance(r, dict) and r.get("rank") == 0] if hasattr(mod, "live_key") else []
+                    if zone:  # «у зоні» за повним сканом — далі живий алерт по цій зоні вже не потрібен
+                        fired_add(os.path.dirname(seen_path) or ".", zone)
+                    return n
                 finally:
                     macq.flush()
             mod.alert_new = alert_new

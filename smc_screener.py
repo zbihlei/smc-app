@@ -8,6 +8,7 @@ SMC-скринер v1: шукає на Binance (USDT-пари, 4h) кандид�
   4) вхід від середини зони, стоп за межею зони, ціль на найближчому свінгу;
   5) R:R не менше заданого (за замовчуванням 3);
   7) v2.7: допуск входу --entry-tol N (% висоти зони): ціна не завжди доходить рівно до середини блока;
+  8) v2.8: ордерблок — ТІЛО свічки (--ob-zone body, за замовчуванням); стоп — за гнотом свічки ОБ; уся свічка: --ob-zone candle.
   6) v2.6: брейкер-блоки — пробитий ордерблок протилежного напрямку, якщо пробій дав BOS (вимкнути: --no-breakers).
 
 Це інструмент для економії часу: він показує КАНДИДАТІВ для ручної перевірки, а не сигнали.
@@ -165,8 +166,21 @@ def structure_events(c, n):
     return events, highs, lows
 
 
-def build_zone(c, ev):
-    """Ордерблок: остання протилежна свічка перед імпульсом, що зламав структуру. Імбаланс (FVG) в імпульсі."""
+def ob_bounds(cd, mode):
+    """Межі ордерблока зі свічки cd. mode="body" (v2.8, за замовчуванням у командному рядку): зона = тіло свічки
+    (від open до close), бо гноти часто «плавають»; якщо тіло менше 10% діапазону (доджі) — уся свічка.
+    mode="candle": уся свічка від low до high (як до v2.8). Повертає (zl, zh, xl, xh): зона і крайні точки свічки."""
+    xl, xh = cd["l"], cd["h"]
+    if mode == "body":
+        bl, bh = min(cd["o"], cd["c"]), max(cd["o"], cd["c"])
+        if xh > xl and (bh - bl) >= 0.1 * (xh - xl):
+            return bl, bh, xl, xh
+    return xl, xh, xl, xh
+
+
+def build_zone(c, ev, cfg=None):
+    """Ордерблок: остання протилежна свічка перед імпульсом, що зламав структуру. Імбаланс (FVG) в імпульсі.
+    Зона — тіло свічки або вся свічка (cfg["ob_zone"]); xl/xh — крайні точки свічки (для стопа й «зону зламано»)."""
     b, d, h = ev["idx"], ev["dir"], ev["level_idx"]
     if d == 1:
         o = min(range(h, b + 1), key=lambda k: c[k]["l"])
@@ -174,14 +188,14 @@ def build_zone(c, ev):
     else:
         o = max(range(h, b + 1), key=lambda k: c[k]["h"])
         ob = next((k for k in range(o, max(-1, o - 7), -1) if c[k]["c"] > c[k]["o"]), o)
-    zl, zh = c[ob]["l"], c[ob]["h"]
+    zl, zh, xl, xh = ob_bounds(c[ob], (cfg or {}).get("ob_zone", "candle"))
     fvgs = []
     for k in range(ob + 1, b):
         if d == 1 and c[k + 1]["l"] > c[k - 1]["h"]:
             fvgs.append((c[k - 1]["h"], c[k + 1]["l"], k))
         if d == -1 and c[k + 1]["h"] < c[k - 1]["l"]:
             fvgs.append((c[k + 1]["h"], c[k - 1]["l"], k))
-    return {"ob": ob, "origin": o, "zl": zl, "zh": zh, "fvgs": fvgs}
+    return {"ob": ob, "origin": o, "zl": zl, "zh": zh, "xl": xl, "xh": xh, "fvgs": fvgs}
 
 
 def find_breakers(c, events, d, cfg):
@@ -200,9 +214,10 @@ def find_breakers(c, events, d, cfg):
     look = cfg.get("breaker_bos_bars", 10)
     out = []
     for oe in old:
-        zo = build_zone(c, oe)
-        zl, zh = zo["zl"], zo["zh"]
-        k_br = next((k for k in range(oe["idx"] + 1, len(c)) if (c[k]["c"] < zl if d == -1 else c[k]["c"] > zh)), None)
+        zo = build_zone(c, oe, cfg)
+        zl, zh, xl, xh = zo["zl"], zo["zh"], zo["xl"], zo["xh"]
+        # пробій — закриття за крайньою точкою свічки ордерблока (а не лише за тілом)
+        k_br = next((k for k in range(oe["idx"] + 1, len(c)) if (c[k]["c"] < xl if d == -1 else c[k]["c"] > xh)), None)
         if k_br is None:
             continue
         bos = next((e for e in d_events if k_br <= e["idx"] <= k_br + look), None)
@@ -218,7 +233,7 @@ def find_breakers(c, events, d, cfg):
                 fvgs.append((c[k + 1]["h"], c[k - 1]["l"], k))
         ev = {"idx": k_br, "dir": d, "level_idx": o, "level": c[o]["h"] if d == -1 else c[o]["l"],
               "breaker": True, "old_idx": oe["idx"], "bos_idx": bos["idx"]}
-        out.append((ev, {"ob": zo["ob"], "origin": o, "zl": zl, "zh": zh, "fvgs": fvgs, "breaker": True}))
+        out.append((ev, {"ob": zo["ob"], "origin": o, "zl": zl, "zh": zh, "xl": xl, "xh": xh, "fvgs": fvgs, "breaker": True}))
     return out
 
 
@@ -226,15 +241,16 @@ def count_visits(c, ev, z):
     """Скільки разів ціна заходила в зону після BOS (по закритих свічках) і чи зону не закрито за межею."""
     b, d = ev["idx"], ev["dir"]
     zl, zh = z["zl"], z["zh"]
+    xl, xh = z.get("xl", zl), z.get("xh", zh)   # зону зламано — закриття за крайньою точкою свічки ордерблока
     visits, in_visit, broken = 0, False, False
     for k in range(b + 1, len(c)):
         if d == 1:
             touched = c[k]["l"] <= zh
-            if c[k]["c"] < zl:
+            if c[k]["c"] < xl:
                 broken = True
         else:
             touched = c[k]["h"] >= zl
-            if c[k]["c"] > zh:
+            if c[k]["c"] > xh:
                 broken = True
         if touched and not in_visit:
             visits += 1
@@ -439,11 +455,12 @@ def analyze_symbol(symbol, candles, px, cfg):
         if last_i - ev["idx"] > cfg["max_age"] or ev["idx"] - ev["level_idx"] > cfg["max_leg"]:
             continue
         mark("2 BOS свіжий, імпульс не задовгий" if zb is None else "2b брейкер: пробій свіжий")
-        z = zb or build_zone(c, ev)
+        z = zb or build_zone(c, ev, cfg)
         if cfg.get("need_fvg", False) and not z["fvgs"]:
             continue
         mark("3 імбаланс (вимагається лише з --need-fvg)")
         zl, zh = z["zl"], z["zh"]
+        xl, xh = z.get("xl", zl), z.get("xh", zh)
         mid = (zl + zh) / 2
         # v2.7: допуск входу — лімітка зсунута від середини до краю, з якого приходить ціна, на N% висоти зони
         tol = max(0.0, min(50.0, float(cfg.get("entry_tol", 0) or 0)))
@@ -457,12 +474,12 @@ def analyze_symbol(symbol, candles, px, cfg):
         mark("5 зона не закрита за межею")
         # поточна ціна відносно зони
         if d == 1:
-            if px < zl:
+            if px < xl:
                 continue
             live_touch = px <= zh
             dist = 0.0 if live_touch else (px - zh) / px * 100
         else:
-            if px > zh:
+            if px > xh:
                 continue
             live_touch = px >= zl
             dist = 0.0 if live_touch else (zl - px) / px * 100
@@ -479,18 +496,18 @@ def analyze_symbol(symbol, candles, px, cfg):
         else:
             continue
         mark("7 ціна біля зони / у зоні, дотик перший")
-        stop = zl * (1 - cfg["buffer"] / 100) if d == 1 else zh * (1 + cfg["buffer"] / 100)
+        stop = xl * (1 - cfg["buffer"] / 100) if d == 1 else xh * (1 + cfg["buffer"] / 100)   # за гнотом свічки ОБ
         wick_used = False
         if cfg.get("wick"):
             lb = max(0, ev["level_idx"] - 20)
             wp = cfg.get("wick_pct", 3.0) / 100
             if d == 1:
-                cs = [p for i, p in lows if i >= lb and p < zl and p >= zl * (1 - wp)]
+                cs = [p for i, p in lows if i >= lb and p < xl and p >= xl * (1 - wp)]
                 w = min(cs) * (1 - cfg["buffer"] / 100) if cs else None
                 if w is not None and w < stop:
                     stop, wick_used = w, True
             else:
-                cs = [p for i, p in highs if i >= lb and p > zh and p <= zh * (1 + wp)]
+                cs = [p for i, p in highs if i >= lb and p > xh and p <= xh * (1 + wp)]
                 w = max(cs) * (1 + cfg["buffer"] / 100) if cs else None
                 if w is not None and w > stop:
                     stop, wick_used = w, True
@@ -950,6 +967,15 @@ def selftest():
     z = build_zone(c, [e for e in events if e["dir"] == 1 and e["idx"] == 17][0])
     check("ордерблок = свічка 14 (остання ведмежа перед імпульсом)", z["ob"] == 14, str(z["ob"]))
     check("межі зони 98.7-100.1", abs(z["zl"] - 98.7) < 1e-9 and abs(z["zh"] - 100.1) < 1e-9, f"{z['zl']}-{z['zh']}")
+    zb_ = build_zone(c, [e for e in events if e["dir"] == 1 and e["idx"] == 17][0], {"ob_zone": "body"})
+    check("v2.8: ордерблок по тілу — зона 99.0-99.8 (open-close), гноти 98.7/100.1 окремо",
+          (zb_["zl"], zb_["zh"], zb_["xl"], zb_["xh"]) == (99.0, 99.8, 98.7, 100.1), str(zb_))
+    check("v2.8: доджі (тіло < 10% свічки) — зона на всю свічку",
+          ob_bounds({"o": 100.0, "c": 100.01, "l": 99.0, "h": 101.0}, "body") == (99.0, 101.0, 99.0, 101.0))
+    _rb = analyze_symbol("DEMOUSDT", c, 100.4, dict(cfg, ob_zone="body", min_stop_atr=0, min_rr=1.0))
+    check("v2.8: вхід від середини тіла (99.4), стоп за гнотом свічки ОБ (нижче 98.7)",
+          len(_rb) == 1 and abs(_rb[0]["entry"] - 99.4) < 1e-9 and _rb[0]["stop"] < 98.7 and _rb[0]["zone_low"] == 99.0,
+          str({k: _rb[0][k] for k in ("entry", "stop", "zone_low", "zone_high")}) if _rb else "нема")
     check("імбаланс (FVG) в імпульсі є", len(z["fvgs"]) >= 1)
 
     _rt = analyze_symbol("DEMOUSDT", c, 100.4, dict(cfg, min_stop_atr=100))
@@ -1385,6 +1411,8 @@ def main():
     p.add_argument("--entry-tol", type=float, default=0.0, metavar="N",
                    help="допуск входу: лімітка на N%% висоти зони ближче до краю, з якого приходить ціна (0 = рівно середина; 50 = край)")
     p.add_argument("--rr-at-limit", action="store_true", help="мін. R:R перевіряти від лімітки з допуском (за замовч. — від середини зони)")
+    p.add_argument("--ob-zone", choices=["body", "candle"], default="body",
+                   help="межі ордерблока: body — тіло свічки (за замовч., v2.8), candle — уся свічка з гнотами")
     p.add_argument("--no-breakers", action="store_true", help="не шукати брейкер-блоки (пробиті ордерблоки, що стали зоною в інший бік)")
     p.add_argument("--only-sweep", action="store_true", help="показувати лише сетапи, де перед BOS був свіп ліквідності")
     p.add_argument("--min-score", type=float, default=None, help="показувати лише кандидатів із балами >= N (за замовч. без фільтра)")
@@ -1430,7 +1458,7 @@ def main():
         MKT.clear(); MKT.update(SPOT)
     cfg = {"knife": not a.no_knife, "knife_mult": a.knife_mult, "knife_look": a.knife_look, "max_atr": a.max_atr, "min_score": a.min_score, "volume": not a.no_volume, "vol_imp": a.vol_imp, "vol_pb": a.vol_pb, "charts": a.charts, "only_sweep": a.only_sweep, "trend": a.trend, "trend_swing": a.trend_swing, "wick": a.stop_wick, "wick_pct": a.wick_pct, "deep": a.deep, "min_stop_atr": a.min_stop_atr, "need_fvg": a.need_fvg, "swing": a.swing, "events": a.events, "max_age": a.max_age, "max_leg": a.max_leg, "max_zone": a.max_zone,
            "approach": a.approach, "buffer": a.buffer, "min_rr": a.min_rr, "allow_retests": a.allow_retests,
-           "fib_lo": a.fib_lo, "fib_hi": a.fib_hi, "breakers": not a.no_breakers,
+           "fib_lo": a.fib_lo, "fib_hi": a.fib_hi, "breakers": not a.no_breakers, "ob_zone": a.ob_zone,
            "entry_tol": max(0.0, min(50.0, a.entry_tol)), "rr_at_limit": a.rr_at_limit}
     if a.debug:
         cfg["stats"] = {}

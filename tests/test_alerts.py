@@ -111,5 +111,34 @@ sp = sorted(t for t, _ in spoken)
 check("крипто + форекс одночасно → голоси все одно по черзі (спільний замок)", len(spoken) == 6 and busy["max"] == 1
       and all(sp[i + 1] - sp[i] >= 0.1 for i in range(5)), (len(spoken), busy))
 
+# ---- 6. «ЦІНА В ЗОНІ»: один алерт на зону (ціна «тремтить» біля краю зони між сканами) — справжній скринер
+import tempfile  # noqa: E402
+APP = os.path.dirname(HERE)
+scr = R.load_screener(os.path.join(APP, "smc_screener.py"))
+R.FIRED.update(path=None, data={})
+got = []
+scr.notify = lambda title, text, kind="new", speak="", ticker="": got.append(text.split(" | ")[0])
+scr.append_log = lambda *a, **k: None
+out = tempfile.mkdtemp()
+seen = os.path.join(out, "seen.json")
+row = {"symbol": "WLFIUSDT", "dir": "Short", "status": "підхід до зони", "rank": 1, "score": 1, "price": 0.0463,
+       "zone_low": 0.04635, "zone_high": 0.04726, "entry": 0.04658, "stop": 0.04733, "target": 0.04351, "rr": 4.1,
+       "dist": 0.1, "flags": [], "sweep": "", "volume": "-"}
+ticks = iter([0.04630, 0.04635, 0.04633, 0.04636, 0.04631, 0.04635] * 20)
+scr.fetch_prices = lambda: {"WLFIUSDT": next(ticks)}
+lw = R.make_live_wait(scr)
+a = types.SimpleNamespace(watch=0.003, price_check=0.02, out=out)
+for _ in range(3):  # три цикли між сканами: кожного разу ціна знову торкається 0.04635
+    lw(a, [dict(row)], seen)
+check("живий «ЦІНА В ЗОНІ» по тій самій зоні — лише один раз за кілька циклів", got.count("ЦІНА В ЗОНІ (наживо): WLFIUSDT Short") == 1, got)
+R.FIRED.update(path=None, data={})
+lw(a, [dict(row)], seen)
+check("і після перезапуску скринера (пам'ять у results/live_fired.json) — без повтору", len(got) == 1, got)
+got.clear()
+scr.alert_new([dict(row, status="у зоні (1-й дотик)", rank=0)], seen)
+check("повний скан: «у зоні» по зоні, де вже був живий алерт, — без повторного «ЦІНА В ЗОНІ»", got == [], got)
+scr.alert_new([dict(row, status="у зоні (1-й дотик)", rank=0, zone_low=0.0450, zone_high=0.0455)], seen)
+check("нова зона тієї ж монети — алерт приходить", len(got) == 1 and "WLFIUSDT" in got[0], got)
+
 print("\nПІДСУМОК: " + ("усі перевірки пройдено" if ok else "Є ПОМИЛКИ"))
 sys.exit(0 if ok else 1)
