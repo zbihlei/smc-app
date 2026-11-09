@@ -78,7 +78,7 @@ main { padding: 18px 24px 40px; max-width: 1800px; margin: 0 auto; }
 .msg { padding: 9px 12px; border-radius: var(--radius); margin: 8px 0; background: #e8f0ff; color: #1b3a8a; }
 .msg.err { background: var(--red-bg); color: #8a1515; }
 .zone-alert {
-  background: var(--red); color: #fff; font-weight: 700;
+  background: var(--green); color: #fff; font-weight: 700;
   padding: 10px 14px; border-radius: var(--radius); margin: 10px 0;
 }
 .zone-alert a { color: #fff; text-decoration: underline; }
@@ -103,12 +103,12 @@ td.wrap { white-space: normal; min-width: 220px; max-width: 360px; }
 td.warn { color: #8a4b00; }
 tbody tr { cursor: pointer; }
 tbody tr:hover td { background: #f6f8fc; }
-tr.s0 td { background: var(--red-bg); border-bottom-color: var(--red-line); }
-tr.s0:hover td { background: #ffd6d6; }
+tr.s0 td { background: #e3f6ef; border-bottom-color: #9fd9c4; }
+tr.s0:hover td { background: #d2efe5; }
 tr.s1 td { background: var(--amber-bg); }
 tr.s1:hover td { background: #fff0c4; }
 tr.s2 td { background: var(--grey-bg); }
-.act0 { color: var(--red); font-weight: 700; }
+.act0 { color: var(--green); font-weight: 700; }
 .dir-Long { color: var(--long); font-weight: 600; }
 .dir-Short { color: var(--short); font-weight: 600; }
 .sym { font-weight: 700; }
@@ -125,7 +125,7 @@ tr.s2 td { background: var(--grey-bg); }
 .lg.path { height: 0; border-top: 2px dashed #787b86; border-radius: 0; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(600px, 1fr)); gap: 16px; }
 .card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; scroll-margin-top: 70px; }
-.card.s0 { border-color: var(--red); box-shadow: inset 4px 0 0 var(--red); }
+.card.s0 { border-color: var(--green); box-shadow: inset 4px 0 0 var(--green); }
 .card.flash { animation: flash 1.4s ease-out; }
 @keyframes flash { 0% { box-shadow: 0 0 0 4px rgba(41,98,255,.55); } 100% { box-shadow: 0 0 0 0 rgba(41,98,255,0); } }
 .card .hd { font-size: 13px; margin-bottom: 6px; line-height: 1.5; }
@@ -538,3 +538,10 @@ table.gt td:first-child { white-space: normal; min-width: 90px; }
 .fx-howto { margin-top: 6px; }
 .fx-howto ol { margin: 6px 0 4px 18px; padding: 0; }
 .fx-howto li { margin: 3px 0; }
+
+/* v1.6.5 — згортання карток графіків */
+.cfold { border: 1px solid var(--line, #d1d4dc); background: #fff; border-radius: 6px; cursor: pointer; font: inherit; font-size: 12px; padding: 1px 8px; margin-right: 6px; }
+.cfold:hover { background: #f0f3fa; }
+.card.folded .tf3, .card.folded > .chart, .card.folded .ltfline { display: none; }
+.card.folded .hd { margin-bottom: 0; }
+.fold-all { font-size: 12px; margin-left: 8px; }

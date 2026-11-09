@@ -244,12 +244,12 @@ function renderAll() {
   const inZone = rows.filter(r => r.rank === 0);
   const za = $("#zoneAlert");
   if (inZone.length) {
-    za.innerHTML = "🔴 Ціна вже в зоні: " + inZone.map(r =>
+    za.innerHTML = "🟢 Ціна вже в зоні: " + inZone.map(r =>
       `<a href="#c${r.idx}" data-jump="${r.idx}">${esc(r.symbol)} ${esc(r.dir)}</a> (вхід ${fmt(r.entry)}, стоп ${fmt(r.stop)}, R:R ${fix(r.rr, 1)})`).join("; ") +
       ". Час вирішувати, чи ставити лімітку: перевір 1h.";
     za.classList.remove("hidden");
   } else za.classList.add("hidden");
-  document.title = (inZone.length ? "🔴 В ЗОНІ: " + inZone.map(r => r.symbol.replace(/USDT$/, "")).join(", ") + " | " : "") + "SMC App";
+  document.title = (inZone.length ? "🟢 В ЗОНІ: " + inZone.map(r => r.symbol.replace(/USDT$/, "")).join(", ") + " | " : "") + "SMC App";
   renderStale();
   renderTable();
   renderCharts();
@@ -355,6 +355,24 @@ function destroyCharts() {
 // лайв-графіки 4h+1h+15m (v1.5): вимикаються в «Налаштуваннях» — тоді один графік 4h, як раніше
 function liveOn() { return !(S.settings && S.settings.ltf_enabled === false); }
 
+// згорнуті картки графіків (пам'ятаємо в браузері: монета|напрям|зона)
+const FOLD = new Set((() => { try { return JSON.parse(localStorage.getItem("smc_fold") || "[]"); } catch (e) { return []; } })());
+function foldKey(r) { return `${r.symbol}|${r.dir}|${r.zone_low}`; }
+function foldSave() { try { localStorage.setItem("smc_fold", JSON.stringify([...FOLD].slice(-300))); } catch (e) { /* */ } }
+function setFold(card, on) {
+  card.classList.toggle("folded", on);
+  const b = card.querySelector(".cfold");
+  if (b) b.textContent = on ? "▸" : "▾";
+  const k = card.dataset.fk;
+  if (on) FOLD.add(k); else FOLD.delete(k);
+}
+document.addEventListener("click", e => {
+  const all = e.target.closest("[data-foldall]");
+  if (all) { const on = all.dataset.foldall === "1"; $$("#charts .card").forEach(c => setFold(c, on)); foldSave(); return; }
+  const b = e.target.closest(".card .cfold");
+  if (b) { const c = b.closest(".card"); setFold(c, !c.classList.contains("folded")); foldSave(); }
+});
+
 function renderCharts() {
   destroyCharts();
   const rows = visibleRows();
@@ -364,8 +382,9 @@ function renderCharts() {
   box.innerHTML = rows.map(r => {
     const extra = (r.sweep ? " | " + esc(r.sweep) : "") + (r.volume && r.volume !== "-" ? " | обсяг: " + esc(r.volume) : "");
     const warn = (r.flags || []).length ? ` | <b class="warnings">${esc(r.flags.join("; "))}</b>` : "";
-    return `<div class="card s${r.rank}" id="c${r.idx}">
-      <div class="hd"><b>${r.idx + 1}. ${esc(r.symbol)}</b> <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.zone_type === "брейкер" ? ' <span class="tag amber">брейкер</span>' : ""}
+    const fk = foldKey(r);
+    return `<div class="card s${r.rank}${FOLD.has(fk) ? " folded" : ""}" id="c${r.idx}" data-fk="${esc(fk)}">
+      <div class="hd"><button type="button" class="cfold" title="Згорнути / розгорнути графіки">${FOLD.has(fk) ? "▸" : "▾"}</button><b>${r.idx + 1}. ${esc(r.symbol)}</b> <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.zone_type === "брейкер" ? ' <span class="tag amber">брейкер</span>' : ""}
         | ${esc(r.status)} | вхід ${fmt(r.entry)} · стоп ${fmt(r.stop)} · ціль ${fmt(r.target)} | <b>R:R ${fix(r.rr, 1)}</b>${extra}${warn}
         | <a href="${tvLink(r.symbol)}" target="_blank" rel="noopener">TradingView</a></div>
       ${liveOn() ? `<div class="tf3">

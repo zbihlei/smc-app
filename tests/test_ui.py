@@ -83,7 +83,7 @@ try:
         check("після «Старт»: скринер працює, у таблиці 6 кандидатів", True)
         check("рядок «ціна в зоні» червоний (1 шт.)", pg.locator("#tbody tr.s0").count() == 1)
         check("банер «Ціна вже в зоні» видно", pg.locator("#zoneAlert").is_visible())
-        check("назва вкладки з 🔴", pg.title().startswith("🔴 В ЗОНІ: SOL"))
+        check("назва вкладки з 🟢", pg.title().startswith("🟢 В ЗОНІ: SOL"))
         expect(pg.locator("#statusLine")).to_contain_text("останній скан", timeout=10000)
         check("рядок статусу показує останній скан", True)
         pg.wait_for_selector("#ch0 canvas", timeout=10000)
