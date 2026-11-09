@@ -15,6 +15,9 @@
 
 І дублює кожен алерт скринера (НОВА ПАРА, ЦІНА В ЗОНІ) у Telegram, якщо задано SMC_TG_TOKEN і SMC_TG_CHAT.
 
+Після кожного скану пояснює, чому пари зі списку минулого скану зникли («<<< ВИБУЛА: ... — причина»),
+у лозі скринера і в results/dropped_log.csv.
+
 Використання (це робить сам додаток):
   python3 -u screener_runner.py /шлях/до/smc_screener.py --watch 30 --approach 4 ...
 """
@@ -114,6 +117,96 @@ def make_live_wait(mod):
     return live_wait
 
 
+# ---------------------------------------------------------------- чому пара вибула зі списку
+DROP_FILE = "dropped_log.csv"
+DROP = {"prev": None, "touched": {}}
+
+
+def _key(r):
+    return f"{r['symbol']}|{r['dir']}|{float(r['zone_low']):.8g}"
+
+
+def _arg(name, default):
+    """Значення параметра скринера з командного рядка (--approach 4 або --approach=4)."""
+    argv = sys.argv
+    for i, x in enumerate(argv):
+        if x == name and i + 1 < len(argv):
+            try:
+                return float(argv[i + 1])
+            except ValueError:
+                return default
+        if x.startswith(name + "="):
+            try:
+                return float(x.split("=", 1)[1])
+            except ValueError:
+                return default
+    return default
+
+
+def drop_reason(p, rows, rejects, px, approach, touched_at=None):
+    """Пояснення простими словами, чому пара p (зі списку минулого скану) зникла в цьому скані."""
+    sym, d = p["symbol"], p["dir"]
+    sgn = 1 if d == "Long" else -1
+    zl, zh, stop, tgt = float(p["zone_low"]), float(p["zone_high"]), float(p["stop"]), float(p["target"])
+    fm = lambda x: f"{x:g}"
+    if any(r["symbol"] == sym and r["dir"] == d for r in rejects):
+        return "структура 4h змінилась — тепер сигнал проти структури (відсіяно)"
+    other = [r for r in rows if r["symbol"] == sym and r["dir"] == d]
+    new_zone = f"; нова зона {fm(other[0]['zone_low'])}–{fm(other[0]['zone_high'])}" if other else ""
+    if px is None:
+        return "нова структура 4h" + new_zone if other else "немає ціни (монету могли прибрати з торгів)"
+    if (px - stop) * sgn <= 0:
+        return f"ціна {fm(px)} пробила стоп {fm(stop)} — сценарій зламано" + new_zone
+    if (px - tgt) * sgn >= 0:
+        return f"ціна {fm(px)} уже дійшла до цілі {fm(tgt)} без входу" + new_zone
+    if touched_at or str(p.get("status", "")).startswith("у зоні") or zl <= px <= zh:
+        when = f" о {touched_at}" if touched_at else ""
+        return f"зону відпрацьовано: ціна вже заходила в зону{when} (беру лише перший дотик)" + new_zone
+    dist = ((px - zh) / px * 100) if d == "Long" else ((zl - px) / px * 100)
+    if dist > approach:
+        return f"ціна {fm(px)} відійшла на {dist:.1f}% від зони (показую до {approach:g}%)" + new_zone
+    if other:
+        return "нова структура 4h" + new_zone
+    return ("зона перестала проходити умови скринера (нова свічка 4h змінила структуру або імпульс, "
+            "R:R нижче мінімуму чи зона застаріла)")
+
+
+def report_dropped(mod, out_dir, stamp, rows, rejects):
+    """Порівняти зі списком минулого скану: для кожної пари, що зникла, — рядок у лозі й у dropped_log.csv."""
+    prev, DROP["prev"] = DROP["prev"], [dict(r) for r in rows]
+    if not prev:
+        return []
+    cur = {_key(r) for r in rows}
+    gone = [p for p in prev if _key(p) not in cur]
+    if not gone:
+        return []
+    try:
+        prices = mod.fetch_prices()
+    except Exception:
+        prices = {}
+    approach = _arg("--approach", 2.0)
+    out = []
+    for p in gone:
+        why = drop_reason(p, rows, rejects, prices.get(p["symbol"]), approach, DROP["touched"].pop(_key(p), None))
+        print(f"  <<< ВИБУЛА: {p['symbol']} {p['dir']} (зона {p['zone_low']:g}–{p['zone_high']:g}) — {why}", flush=True)
+        out.append((p, why))
+    try:
+        import csv
+        path = os.path.join(out_dir, DROP_FILE)
+        new = not os.path.exists(path)
+        with open(path, "a", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            if new:
+                w.writerow(["time", "symbol", "dir", "zone_low", "zone_high", "entry", "stop", "target", "price", "reason"])
+            day = dt.datetime.now().strftime("%Y-%m-%d")
+            for p, why in out:
+                w.writerow([f"{day} {stamp[-5:]}", p["symbol"], p["dir"], p["zone_low"], p["zone_high"], p["entry"], p["stop"],
+                            p["target"], prices.get(p["symbol"], ""), why])
+    except Exception as e:
+        print(f"  [додаток] не вдалося записати {DROP_FILE}: {e}")
+    return out
+
+
 def install_hooks(mod):
     orig_save_json = mod.save_json
     orig_append_log = mod.append_log
@@ -131,7 +224,13 @@ def install_hooks(mod):
     def append_log(out_dir, stamp, rows, rejects, live=None):
         orig_append_log(out_dir, stamp, rows, rejects, live)
         if live:  # живий алерт: файл оновить save_json у refresh()
+            for r, _px in live:
+                DROP["touched"][_key(r)] = dt.datetime.now().strftime("%H:%M")
             return
+        try:
+            report_dropped(mod, out_dir, stamp, rows, rejects)
+        except Exception as e:  # пояснення — не критичне, скринер працює далі
+            print(f"  [додаток] не вдалося пояснити, чому пари вибули: {e}")
         try:
             write_app_json(out_dir, rows, stamp, market())
         except Exception as e:
