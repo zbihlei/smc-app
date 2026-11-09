@@ -96,6 +96,18 @@ r = REF(series(INTO[:-3] + [93, 96, 98]), SIG, 25)
 check("ціна пробила стоп 4h → «сценарій зламано» (без входу)", r["status"] == "broken" and "4h" in r["why"], r)
 
 
+# --- лише свічки після підтвердження сетапу (BOS на 4h): імпульс до BOS не є ні дотиком, ні пробоєм стопа
+PRE = [100, 97, 93.2, 96, 99, 104, 108, 110]            # до BOS: ціна ходила нижче стопа 4h (94)
+cc = series(PRE + CHOCH)
+since = cc[len(PRE)][0]
+check("без межі в часі: свічки до сетапу дають хибне «сценарій зламано»", REF(cc, SIG)["status"] == "broken")
+check("з межею (закриття BOS на 4h): ті самі свічки ігноруються → злам 15m, лімітка", REF(cc, SIG, since_ms=since)["status"] == "choch",
+      REF(cc, SIG, since_ms=since))
+row4 = {"chart": [[1_000_000 + i * 14_400_000, 1, 1, 1, 1] for i in range(10)], "bos_bars_ago": 3, "tf_ms": 14_400_000}
+check("момент BOS із даних сигналу: остання закрита 4h − bos_bars_ago, + 4h (закриття свічки BOS)",
+      ltf.sig_since(row4) == 1_000_000 + 9 * 14_400_000 - 3 * 14_400_000 + 14_400_000 and ltf.sig_since({}) is None)
+
+
 def mirror(c):
     return [[x[0], 200 - x[1], 200 - x[3], 200 - x[2], 200 - x[4], x[5], x[6]] for x in c]
 

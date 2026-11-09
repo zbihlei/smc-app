@@ -92,12 +92,28 @@ def structure(c, n=3):
     return d
 
 
-def refine(c15, sig, tol_pct=0.0, buffer_pct=0.05, n=2, min_stop_atr=0.6, min_rr=3.0):
+def sig_since(r):
+    """З якого моменту дивитись 15m: закриття свічки BOS на 4h (до нього зони ще не було — свічки до сетапу,
+    наприклад сам імпульс, не можна вважати ні «дотиком», ні «пробоєм стопа»). None — якщо даних немає."""
+    try:
+        ch, ago, tf = r.get("chart") or [], r.get("bos_bars_ago"), r.get("tf_ms") or 14_400_000
+        if ch and ago is not None:
+            return int(ch[-1][0]) - int(ago) * int(tf) + int(tf)
+        if r.get("zone_t"):
+            return int(r["zone_t"]) + int(tf)
+    except (TypeError, ValueError, IndexError):
+        pass
+    return None
+
+
+def refine(c15, sig, tol_pct=0.0, buffer_pct=0.05, n=2, min_stop_atr=0.6, min_rr=3.0, since_ms=None):
     """c15 — ЗАКРИТІ свічки 15m [[t,o,h,l,c,...]], sig — сигнал скринера (dir, zone_low, zone_high, stop, target).
     Повертає dict зі статусом і рівнями (див. опис модуля)."""
     d = 1 if sig["dir"] == "Long" else -1
     zl, zh, S4, TG = sig["zone_low"], sig["zone_high"], sig["stop"], sig["target"]
     out = {"status": "wait_zone", "dir": sig["dir"]}
+    if since_ms is not None:          # лише свічки після підтвердження сетапу (закриття BOS на 4h)
+        c15 = [x for x in c15 if x[0] >= since_ms]
     if len(c15) < 2 * n + 5:
         return out
     touch = (lambda k: c15[k][3] <= zh) if d == 1 else (lambda k: c15[k][2] >= zl)
@@ -209,7 +225,7 @@ class LtfWatcher:
                 fk = self.fetch or fetch_klines
                 c15 = [x for x in fk(r["symbol"], "15m", 200, self.base) if x[6]]
                 c1h = [x for x in fk(r["symbol"], "1h", 120, self.base) if x[6]]
-                res = refine(c15, r, self.get_tol(), **(self.get_opts() or {}))
+                res = refine(c15, r, self.get_tol(), since_ms=sig_since(r), **(self.get_opts() or {}))
                 res["ctx_1h"] = structure(c1h, 3)
                 res["status_txt"] = STATUS_TXT.get(res["status"], res["status"])
                 new_state[key] = res
