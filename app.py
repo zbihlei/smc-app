@@ -35,11 +35,12 @@ import backtest_trades
 import gitsync
 import spot_scan
 import ltf
+import fx_source
 import journal
 import tg
 import stats
 
-APP_VERSION = "1.5.4"
+APP_VERSION = "1.6"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -47,6 +48,9 @@ SETTINGS_PATH = os.path.join(DATA_DIR, "settings.json")
 STATE_PATH = os.path.join(DATA_DIR, "state.json")
 LOG_PATH = os.path.join(DATA_DIR, "screener.log")
 RUNNER = os.path.join(APP_DIR, "screener_runner.py")
+FX_RUNNER = os.path.join(APP_DIR, "fx_runner.py")
+FX_STATE_PATH = os.path.join(DATA_DIR, "state_fx.json")
+FX_LOG_PATH = os.path.join(DATA_DIR, "screener_fx.log")
 LOG_MAX_BYTES = 2_000_000
 
 DEFAULTS = {
@@ -55,6 +59,9 @@ DEFAULTS = {
     "watch": 30,
     "approach": 4,
     "top": 100,
+    "fx_enabled": False,          # форекс-скринер (дані з MT5 через робота SMC_Bridge)
+    "fx_pairs": fx_source.DEFAULT_PAIRS,
+    "fx_dir": "",                 # папка файлів робота (порожньо — знайти автоматично)
     "min_volume": 30,             # мін. обсяг торгів за 24 год, млн $ (скринер: --min-volume; монети з меншим обсягом не скануються)
     "price_check": 15,
     "min_stop_atr": 0.6,
@@ -82,7 +89,7 @@ LIMITS = {
     "price_check": (0, 600, float), "min_stop_atr": (0, 5, float), "entry_tol": (0, 50, float),
 }
 TRENDS = ("strict", "flag", "bos")
-FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers", "spot_auto", "ltf_enabled")
+FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers", "spot_auto", "ltf_enabled", "fx_enabled")
 ICLOUD_DIR = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs")
 
 
@@ -126,6 +133,15 @@ def validate_settings(new):
                 errors.append("trend: strict / flag / bos")
                 continue
             s[k] = v
+        elif k == "fx_pairs":
+            pairs, bad = fx_source.parse_pairs(str(v))
+            if bad:
+                errors.append("пари форексу: не валютні пари — " + ", ".join(bad[:5]) + " (лише 6 літер, напр. EURUSD)")
+                continue
+            if not pairs:
+                errors.append("пари форексу: список порожній")
+                continue
+            s[k] = ",".join(pairs)
         elif k == "extra_args":
             try:
                 shlex.split(str(v))
@@ -184,13 +200,64 @@ def build_command(s):
     return cmd
 
 
+def fx_results_dir(s):
+    return os.path.join(results_dir(s), "forex")
+
+
+def build_fx_command(s):
+    """Форекс: та сама стратегія й параметри, дані — з MT5 (fx_runner.py). Без --min-volume (обсяг тиковий) і без таблиці."""
+    cmd = build_command(s)
+    i = cmd.index(RUNNER)
+    cmd[i] = FX_RUNNER
+    for opt in ("--min-volume", "--out"):
+        if opt in cmd:
+            j = cmd.index(opt)
+            del cmd[j:j + 2]
+    cmd += ["--out", fx_results_dir(s)]
+    return cmd
+
+
+def fx_env(s):
+    return {"SMC_FX_DIR": os.path.expanduser(s.get("fx_dir") or ""), "SMC_FX_PAIRS": s.get("fx_pairs") or fx_source.DEFAULT_PAIRS}
+
+
+def fx_launch_sig(s):
+    return [display_command(build_fx_command(s)), tg_chat(s), fx_env(s)]
+
+
+def apply_fx(s):
+    """Після зміни налаштувань: форекс вимкнено — зупинити; змінились параметри — перезапустити. Повертає примітку."""
+    write_fx_pairs(s)
+    if FX is None or not FX.status()["running"]:
+        return ""
+    if not s.get("fx_enabled"):
+        FX.stop()
+        return " Форекс вимкнено — форекс-скринер зупинено."
+    if FX.needs_restart(s):
+        ok, msg = FX.restart(s)
+        return " Форекс-скринер перезапущено." if ok else f" Перезапустити форекс-скринер не вдалося: {msg}"
+    return ""
+
+
+def write_fx_pairs(s):
+    """Список пар для робота SMC_Bridge (він читає SMC/pairs.txt раз на хвилину)."""
+    d = fx_source.find_dir(s.get("fx_dir") or "")
+    if not d:
+        return
+    try:
+        with open(os.path.join(d, "pairs.txt"), "w", encoding="utf-8") as f:
+            f.write(s.get("fx_pairs") or fx_source.DEFAULT_PAIRS)
+    except OSError:
+        pass
+
+
 def display_command(cmd):
     """Коротка, читабельна версія команди для інтерфейсу."""
     out = []
     for x in cmd:
         if x == sys.executable:
             x = "python3"
-        elif x.endswith("screener_runner.py") or x.endswith(".py"):
+        elif x.endswith(".py"):
             x = os.path.basename(x)
         elif x.endswith("caffeinate"):
             x = "caffeinate"
@@ -217,11 +284,20 @@ def pid_is_ours(pid):
         out = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True, timeout=5).stdout
     except Exception:
         return pid_alive(pid)
-    return "screener_runner.py" in out
+    return "screener_runner.py" in out or "fx_runner.py" in out
 
 
 class Screener:
-    def __init__(self):
+    """Процес скринера. Два екземпляри: крипто (Binance) і форекс (MT5) — кожен зі своїм станом, логом і командою."""
+
+    def __init__(self, state_path=None, log_path=None, cmd_fn=None, out_fn=None, sig_fn=None, env_fn=None, name="крипто"):
+        self.state_path = state_path or STATE_PATH
+        self.log_path = log_path or LOG_PATH
+        self.cmd_fn = cmd_fn or build_command
+        self.out_fn = out_fn or results_dir
+        self.sig_fn = sig_fn or launch_sig
+        self.env_fn = env_fn or (lambda s: {})
+        self.name = name
         self.lock = threading.Lock()
         self.proc = None
         self.state = self._load_state()
@@ -230,7 +306,7 @@ class Screener:
     # стан між перезапусками додатка: скринер працює окремо й не зупиняється разом із вікном/терміналом додатка
     def _load_state(self):
         try:
-            with open(STATE_PATH, encoding="utf-8") as f:
+            with open(self.state_path, encoding="utf-8") as f:
                 st = json.load(f)
             if st.get("pid") and pid_alive(st["pid"]) and pid_is_ours(st["pid"]):
                 return st
@@ -240,7 +316,7 @@ class Screener:
 
     def _save_state(self):
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(STATE_PATH, "w", encoding="utf-8") as f:
+        with open(self.state_path, "w", encoding="utf-8") as f:
             json.dump(self.state, f, ensure_ascii=False)
 
     def running(self):
@@ -260,7 +336,7 @@ class Screener:
     def _finished(self, code):
         if self.state.get("pid") and not self.state.get("stopping"):
             self.last_exit = {"code": code, "at": dt.datetime.now().strftime("%H:%M:%S")}
-            log_line(f"Скринер завершився сам (код {code}). Подивись повідомлення вище.")
+            log_line(f"Скринер завершився сам (код {code}). Подивись повідомлення вище.", self.log_path)
         self.proc = None
         self.state = {}
         self._save_state()
@@ -272,11 +348,11 @@ class Screener:
             sp = screener_path(s)
             if not os.path.exists(sp):
                 return False, f"Не знайдено скринер: {sp}. Вкажи шлях у «Налаштуваннях»."
-            os.makedirs(results_dir(s), exist_ok=True)
-            cmd = build_command(s)
-            rotate_log()
+            os.makedirs(self.out_fn(s), exist_ok=True)
+            cmd = self.cmd_fn(s)
+            rotate_log(self.log_path)
             os.makedirs(DATA_DIR, exist_ok=True)
-            log = open(LOG_PATH, "a", encoding="utf-8")
+            log = open(self.log_path, "a", encoding="utf-8")
             log.write(f"\n===== {dt.datetime.now():%Y-%m-%d %H:%M:%S} старт: {display_command(cmd)}\n")
             log.flush()
             env = dict(os.environ, PYTHONIOENCODING="utf-8", PYTHONUNBUFFERED="1",
@@ -284,12 +360,13 @@ class Screener:
             if not s.get("sheet_sync"):  # запис у Google Таблицю вимкнено: скринер не оновлює й аркуш «Скринер»
                 env["SMC_SHEET_URL"] = ""
                 env["SMC_SHEET_TOKEN"] = ""
+            env.update(self.env_fn(s))
             self.proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                          cwd=APP_DIR, env=env, start_new_session=True)
             log.close()  # дочірній процес тримає свою копію дескриптора
             self.last_exit = None
             self.state = {"pid": self.proc.pid, "started_at": dt.datetime.now().isoformat(timespec="seconds"),
-                          "command": display_command(cmd), "results_dir": results_dir(s), "launch": launch_sig(s)}
+                          "command": display_command(cmd), "results_dir": self.out_fn(s), "launch": self.sig_fn(s)}
             self._save_state()
             return True, "Скринер запущено"
 
@@ -318,7 +395,7 @@ class Screener:
                 else:
                     continue
                 break
-            log_line(f"===== {dt.datetime.now():%Y-%m-%d %H:%M:%S} зупинено з додатка")
+            log_line(f"===== {dt.datetime.now():%Y-%m-%d %H:%M:%S} зупинено з додатка", self.log_path)
             self.proc = None
             self.state = {}
             self._save_state()
@@ -330,15 +407,15 @@ class Screener:
             if not self.running():
                 return False
             if self.state.get("launch") is not None:
-                return self.state["launch"] != launch_sig(s)
-            return self.state.get("command") != display_command(build_command(s))
+                return self.state["launch"] != json.loads(json.dumps(self.sig_fn(s)))
+            return self.state.get("command") != display_command(self.cmd_fn(s))
 
     def restart(self, s):
         """Застосувати нові налаштування: зупинити й одразу запустити (новий скан почнеться відразу)."""
         ok, msg = self.stop()
         if not ok:
             return False, msg
-        log_line(f"===== {dt.datetime.now():%Y-%m-%d %H:%M:%S} перезапуск: застосовано нові налаштування")
+        log_line(f"===== {dt.datetime.now():%Y-%m-%d %H:%M:%S} перезапуск: застосовано нові налаштування", self.log_path)
         return self.start(s)
 
     def status(self):
@@ -351,19 +428,20 @@ class Screener:
                     "last_exit": self.last_exit}
 
 
-def log_line(text):
+def log_line(text, path=None):
     try:
         os.makedirs(DATA_DIR, exist_ok=True)
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
+        with open(path or LOG_PATH, "a", encoding="utf-8") as f:
             f.write(text + "\n")
     except Exception:
         pass
 
 
-def rotate_log():
+def rotate_log(path=None):
+    path = path or LOG_PATH
     try:
-        if os.path.getsize(LOG_PATH) > LOG_MAX_BYTES:
-            os.replace(LOG_PATH, LOG_PATH + ".1")
+        if os.path.getsize(path) > LOG_MAX_BYTES:
+            os.replace(path, path + ".1")
     except OSError:
         pass
 
@@ -387,15 +465,16 @@ ERR_RE = re.compile(r"^\[(\d\d:\d\d)\] помилка скану: (.*)")
 STALE_EXTRA_MIN = 10   # скан вважається пропущеним, якщо його немає довше за інтервал + стільки хвилин
 
 
-def scan_age(st=None, s=None):
+def scan_age(st=None, s=None, scr=None):
     """Скільки секунд тому був останній скан: за часом зміни results/latest_app.json (пишеться після кожного скану).
     Повертає (вік_с або None, пропущено_скан?)."""
     s = s or load_settings()
-    st = st or SCREENER.status()
+    scr = scr or SCREENER
+    st = st or scr.status()
     if not st.get("running"):
         return None, False
     try:
-        mtime = os.path.getmtime(os.path.join(results_dir(s), "latest_app.json"))
+        mtime = os.path.getmtime(os.path.join(scr.out_fn(s), "latest_app.json"))
     except OSError:
         mtime = None
     started = None
@@ -435,42 +514,49 @@ def notify_mac(title, text):
 
 
 def watchdog(interval=60, wake_gap=90, grace=240):
-    """Фоновий наглядач: сповіщає, якщо скринер завершився сам або давно не сканував.
+    """Фоновий наглядач: сповіщає, якщо скринер (крипто чи форекс) завершився сам або давно не сканував.
     Після сну Mac дає скринеру grace секунд на скан після пробудження (без хибних тривог)."""
     last_tick = time.time()
     quiet_until = time.time() + grace
-    told_exit, told_stale = None, False
+    told = {}
     while True:
         time.sleep(interval)
         now = time.time()
         if now - last_tick - interval > wake_gap:
             quiet_until = now + grace  # Mac щойно прокинувся
         last_tick = now
-        try:
-            st = SCREENER.status()
-            ex = st.get("last_exit")
-            if ex and ex != told_exit:
-                told_exit = ex
-                notify_mac("SMC App: скринер зупинився", f"Скринер завершився сам о {ex['at']}. Відкрий SMC App і натисни «Старт».")
-            if not st.get("running"):
-                told_stale = False
+        for scr in (SCREENER, FX):
+            if scr is None:
                 continue
-            age, stale = scan_age(st)
-            if stale and not told_stale and now >= quiet_until:
-                told_stale = True
-                mins = int((age or 0) // 60)
-                notify_mac("SMC App: немає сканів", (f"Останній скан {mins} хв тому. " if age else "")
-                           + "Перевір мережу; подробиці — у лозі скринера в додатку.")
-            elif not stale:
-                told_stale = False
-        except Exception as e:
-            log_line(f"наглядач: {e}")
+            t = told.setdefault(scr.name, {"exit": None, "stale": False})
+            fx = scr is FX
+            label = "форекс-скринер" if fx else "скринер"
+            try:
+                st = scr.status()
+                ex = st.get("last_exit")
+                if ex and ex != t["exit"]:
+                    t["exit"] = ex
+                    notify_mac(f"SMC App: {label} зупинився", f"{label.capitalize()} завершився сам о {ex['at']}. Відкрий SMC App і натисни «Старт».")
+                if not st.get("running"):
+                    t["stale"] = False
+                    continue
+                age, stale = scan_age(st, scr=scr)
+                if stale and not t["stale"] and now >= quiet_until:
+                    t["stale"] = True
+                    mins = int((age or 0) // 60)
+                    notify_mac(f"SMC App: немає сканів ({label})", (f"Останній скан {mins} хв тому. " if age else "")
+                               + ("Перевір, чи відкритий MT5 з роботом SMC_Bridge" if fx else "Перевір мережу")
+                               + "; подробиці — у лозі скринера в додатку.")
+                elif not stale:
+                    t["stale"] = False
+            except Exception as e:
+                log_line(f"наглядач: {e}", scr.log_path)
 
 
-def last_scan_info():
+def last_scan_info(path=None):
     """Останній рядок скану з логу (час — як його пише скринер, тобто час Mac)."""
     info = {"last_scan": None, "last_error": None}
-    for line in reversed(tail(LOG_PATH, 400)):
+    for line in reversed(tail(path or LOG_PATH, 400)):
         if line.startswith("===== ") and "старт:" in line:
             break
         if info["last_scan"] is None:
@@ -487,8 +573,8 @@ def last_scan_info():
     return info
 
 
-def read_results(s, since=None):
-    d = results_dir(s)
+def read_results(s, since=None, d=None):
+    d = d or results_dir(s)
     for name, source in (("latest_app.json", "app"), ("latest.json", "legacy")):
         p = os.path.join(d, name)
         try:
@@ -1020,11 +1106,12 @@ def ltf_opts(s):
     return {"min_stop_atr": float(s.get("min_stop_atr") or 0), "min_rr": rr}
 
 
-def ltf_rows():
+def ltf_rows(fx=False):
     """Сигнали «у списку» з останнього скану (не старші за 3 години — інакше скринер, імовірно, не працює)."""
-    if not load_settings().get("ltf_enabled", True):
+    s = load_settings()
+    if not s.get("ltf_enabled", True) or (fx and not s.get("fx_enabled")):
         return []
-    res = read_results(load_settings())
+    res = read_results(s, d=fx_results_dir(s) if fx else None)
     if res.get("source") != "app" or res.get("age_s", 1e9) > 3 * 3600:
         return []
     return [r for r in (res.get("data") or {}).get("candidates", []) if r.get("symbol") and r.get("zone_low")]
@@ -1036,7 +1123,21 @@ LTF = ltf.LtfWatcher(DATA_DIR, ltf_rows, lambda t, x: notify_mac(t, x),
                      interval=float(os.environ.get("SMC_LTF_INTERVAL") or 60))
 
 
+def fx_src(s=None):
+    s = s or load_settings()
+    return fx_source.Source(s.get("fx_dir") or "", s.get("fx_pairs") or fx_source.DEFAULT_PAIRS)
+
+
+LTF_FX = ltf.LtfWatcher(DATA_DIR, lambda: ltf_rows(fx=True), lambda t, x: notify_mac(t, x),
+                        get_tol=lambda: float(load_settings().get("entry_tol") or 0),
+                        get_opts=lambda: ltf_opts(load_settings()),
+                        fetch=lambda sym, tf, limit=200, base=None: fx_src().klines(sym, tf, limit),
+                        seen_name="ltf_seen_fx.json", label="ФОРЕКС ",
+                        interval=float(os.environ.get("SMC_LTF_INTERVAL") or 60))
+
+
 def klines_api(q):
+    fx = (q.get("market") or [""])[0] == "fx"
     sym = ((q.get("symbol") or [""])[0]).upper()
     tf = (q.get("tf") or ["15m"])[0]
     try:
@@ -1046,9 +1147,12 @@ def klines_api(q):
     if not re.fullmatch(r"[A-Z0-9]{2,30}", sym):
         return 400, {"ok": False, "error": "некоректна монета"}
     try:
-        return 200, {"ok": True, "symbol": sym, "tf": tf, "bars": ltf.fetch_klines(sym, tf, limit)}
+        bars = fx_src().klines(sym, tf, limit) if fx else ltf.fetch_klines(sym, tf, limit)
+        return 200, {"ok": True, "symbol": sym, "tf": tf, "bars": bars}
     except ValueError as e:
         return 400, {"ok": False, "error": str(e)}
+    except fx_source.FxError as e:
+        return 200, {"ok": False, "error": str(e)}
     except Exception as e:
         # 200, а не 502: інтерфейс сам покаже «немає свічок» (без червоних помилок у консолі браузера)
         return 200, {"ok": False, "error": f"Binance недоступний: {e}"}
@@ -1268,6 +1372,7 @@ def journal_csv():
 # HTTP
 # ----------------------------------------------------------------------------
 SCREENER = None
+FX = None
 SERVER = None
 
 
@@ -1311,13 +1416,20 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         s = load_settings()
+        mk = "fx" if (q.get("market") or [""])[0] == "fx" else ""
+        scr = FX if mk == "fx" else SCREENER
         if u.path == "/api/status":
-            st = SCREENER.status()
-            st.update(last_scan_info())
-            age, stale = scan_age(st, s)
+            st = scr.status()
+            st.update(last_scan_info(scr.log_path))
+            age, stale = scan_age(st, s, scr)
             st["last_scan_age_s"] = None if age is None else round(age)
             st["stale"] = stale
             st["env"] = environment_info(s)
+            st["market"] = mk or "crypto"
+            st["fx_enabled"] = bool(s.get("fx_enabled"))
+            st["markets"] = {"crypto": SCREENER.status()["running"], "fx": FX.status()["running"]}
+            if mk == "fx":
+                st["fx"] = fx_source.describe(s.get("fx_dir") or "", s.get("fx_pairs"))
             return self._send(200, st)
         if u.path == "/api/results":
             since = None
@@ -1326,10 +1438,10 @@ class Handler(BaseHTTPRequestHandler):
                     since = float(q["since"][0])
                 except ValueError:
                     pass
-            return self._send(200, read_results(s, since))
+            return self._send(200, read_results(s, since, scr.out_fn(s)))
         if u.path == "/api/log":
             n = min(2000, max(10, int((q.get("n") or ["300"])[0] or 300)))
-            return self._send(200, {"lines": tail(LOG_PATH, n), "path": LOG_PATH})
+            return self._send(200, {"lines": tail(scr.log_path, n), "path": scr.log_path})
         if u.path == "/api/journal":
             trades = JOURNAL.list()
             url, token = journal.sheet_config()
@@ -1349,8 +1461,11 @@ class Handler(BaseHTTPRequestHandler):
             code, res = klines_api(q)
             return self._send(code, res)
         if u.path == "/api/ltf":
-            return self._send(200, {"state": LTF.state, "last_run": LTF.last_run, "error": LTF.error,
+            w = LTF_FX if mk == "fx" else LTF
+            return self._send(200, {"state": w.state, "last_run": w.last_run, "error": w.error,
                                     "enabled": bool(load_settings().get("ltf_enabled", True))})
+        if u.path == "/api/fx":
+            return self._send(200, dict(fx_source.describe(s.get("fx_dir") or "", s.get("fx_pairs")), enabled=bool(s.get("fx_enabled"))))
         if u.path == "/api/spot":
             return self._send(200, spot_state())
         if u.path == "/api/git/status":
@@ -1431,11 +1546,21 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return self._send(400, {"ok": False, "error": f"некоректний запит: {e}"})
         s = load_settings()
+        mk = "fx" if parse_qs(u.query).get("market", [""])[0] == "fx" else ""
+        scr = FX if mk == "fx" else SCREENER
         if u.path == "/api/start":
-            ok, msg = SCREENER.start(s)
+            if mk == "fx":
+                if not s.get("fx_enabled"):
+                    return self._send(409, {"ok": False, "message": "Форекс вимкнено: увімкни його в «Налаштуваннях → Форекс»"})
+                write_fx_pairs(s)
+            ok, msg = scr.start(s)
+            if ok and mk == "fx":
+                msg = "Форекс-скринер запущено"
             return self._send(200 if ok else 409, {"ok": ok, "message": msg})
         if u.path == "/api/stop":
-            ok, msg = SCREENER.stop()
+            ok, msg = scr.stop()
+            if ok and mk == "fx":
+                msg = "Форекс-скринер зупинено"
             return self._send(200 if ok else 409, {"ok": ok, "message": msg})
         if u.path == "/api/settings":
             new, errors = validate_settings(body.get("settings") or {})
@@ -1454,12 +1579,14 @@ class Handler(BaseHTTPRequestHandler):
                 note = "Збережено й застосовано (скринер працює далі — ці зміни не потребують перезапуску)."
             else:
                 note = "Збережено. Параметри діятимуть з наступного «Старт»."
+            note += apply_fx(new)
             return self._send(200, {"ok": True, "message": note, "settings": new, "restarted": restarted,
                                     "command": display_command(build_command(new))})
         if u.path == "/api/settings/reset":
             save_settings(dict(DEFAULTS))
             if SCREENER.needs_restart(load_settings()):
                 SCREENER.restart(load_settings())
+            apply_fx(load_settings())
             return self._send(200, {"ok": True, "settings": DEFAULTS})
         if u.path == "/api/selftest":
             return self._send(200, run_selftest(s))
@@ -1476,6 +1603,7 @@ class Handler(BaseHTTPRequestHandler):
             save_settings(new)
             if SCREENER.needs_restart(new):  # щоб алерти скринера одразу йшли в Telegram
                 SCREENER.restart(new)
+            apply_fx(new)
             run = SCREENER.status()["running"]
             return self._send(200, {"ok": True, "chat": str(chat), "name": name, "bot": bot, "screener_running": run})
         if u.path == "/api/telegram/test":
@@ -1492,6 +1620,7 @@ class Handler(BaseHTTPRequestHandler):
             save_settings(new)
             if SCREENER.needs_restart(new):
                 SCREENER.restart(new)
+            apply_fx(new)
             return self._send(200, {"ok": True})
         if u.path == "/api/journal/link_clear":
             code, res = journal_link_clear(s)
@@ -1572,6 +1701,10 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "немає такого шляху"})
 
     def _static(self, path):
+        if path == "/download/SMC_Bridge.mq5":  # робот для MT5 (форекс)
+            with open(os.path.join(APP_DIR, "mt5", "SMC_Bridge.mq5"), "rb") as f:
+                return self._send(200, f.read(), "application/octet-stream",
+                                  {"Content-Disposition": 'attachment; filename="SMC_Bridge.mq5"'})
         if path in ("", "/"):
             path = "/index.html"
         full = os.path.normpath(os.path.join(STATIC_DIR, path.lstrip("/")))
@@ -1585,7 +1718,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main():
-    global SCREENER, JOURNAL, SERVER
+    global SCREENER, FX, JOURNAL, SERVER
     p = argparse.ArgumentParser(description="SMC App: скринер + журнал на localhost")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true", help="не відкривати браузер автоматично")
@@ -1593,6 +1726,7 @@ def main():
     mimetypes.add_type("application/javascript", ".js")
     os.makedirs(DATA_DIR, exist_ok=True)
     SCREENER = Screener()
+    FX = Screener(FX_STATE_PATH, FX_LOG_PATH, build_fx_command, fx_results_dir, fx_launch_sig, fx_env, "форекс")
     JOURNAL = journal.Journal(DATA_DIR)
     ed = load_settings().get("backup_extra_dir") or None
     for err in (JOURNAL.daily_snapshot(ed), JOURNAL.backup(ed) if JOURNAL.rows() else None):
@@ -1615,6 +1749,7 @@ def main():
     GIT.start()
     threading.Thread(target=spot_auto_loop, daemon=True).start()
     LTF.start()
+    LTF_FX.start()
     if not a.no_browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
@@ -1623,7 +1758,7 @@ def main():
         pass
     finally:
         srv.server_close()
-        if SCREENER.status()["running"]:
+        if SCREENER.status()["running"] or FX.status()["running"]:
             print("\nДодаток закрито. Скринер ПРОДОВЖУЄ працювати у фоні; зупинити: знову відкрий додаток → «Стоп».")
         else:
             print("\nДодаток закрито.")

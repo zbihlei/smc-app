@@ -184,11 +184,14 @@ def sig_key(r):
 class LtfWatcher:
     """Раз на хвилину: для кожного сигналу «у списку» — уточнення 15m і контекст 1h; алерт на перехід у «choch»."""
 
-    def __init__(self, data_dir, get_rows, notify, get_tol=lambda: 0.0, base=None, interval=60, get_opts=lambda: {}):
+    def __init__(self, data_dir, get_rows, notify, get_tol=lambda: 0.0, base=None, interval=60, get_opts=lambda: {},
+                 fetch=None, seen_name="ltf_seen.json", label=""):
         self.data_dir, self.get_rows, self.notify, self.get_tol, self.get_opts = data_dir, get_rows, notify, get_tol, get_opts
+        self.fetch = fetch          # None — Binance (fetch_klines); для форексу — свічки з MT5
+        self.label = label          # «ФОРЕКС » у заголовку алерту
         self.base, self.interval = base, interval
         self.state = {}
-        self.seen_path = os.path.join(data_dir, "ltf_seen.json")
+        self.seen_path = os.path.join(data_dir, seen_name)
         try:
             with open(self.seen_path, encoding="utf-8") as f:
                 self.seen = json.load(f)
@@ -203,8 +206,9 @@ class LtfWatcher:
         for r in rows:
             try:
                 key = sig_key(r)
-                c15 = [x for x in fetch_klines(r["symbol"], "15m", 200, self.base) if x[6]]
-                c1h = [x for x in fetch_klines(r["symbol"], "1h", 120, self.base) if x[6]]
+                fk = self.fetch or fetch_klines
+                c15 = [x for x in fk(r["symbol"], "15m", 200, self.base) if x[6]]
+                c1h = [x for x in fk(r["symbol"], "1h", 120, self.base) if x[6]]
                 res = refine(c15, r, self.get_tol(), **(self.get_opts() or {}))
                 res["ctx_1h"] = structure(c1h, 3)
                 res["status_txt"] = STATUS_TXT.get(res["status"], res["status"])
@@ -213,7 +217,7 @@ class LtfWatcher:
                     self.seen[key] = res.get("choch_t")
                     self._save_seen()
                     ctx = {1: "вгору", -1: "вниз"}.get(res["ctx_1h"], "немає")
-                    self.notify("УТОЧНЕННЯ 15m", f"{r['symbol']} {r['dir']} — лімітка {res['entry']:g}, стоп {res['stop']:g}, "
+                    self.notify(f"{self.label}УТОЧНЕННЯ 15m", f"{r['symbol']} {r['dir']} — лімітка {res['entry']:g}, стоп {res['stop']:g}, "
                                                   f"ціль {res['target']:g}, R:R {res['rr']:.1f} (структура 1h: {ctx})")
             except Exception as e:  # одна монета не має зупиняти решту
                 new_state[sig_key(r)] = {"status": "error", "status_txt": "немає даних", "why": str(e)[:200]}

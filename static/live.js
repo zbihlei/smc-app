@@ -108,7 +108,7 @@ async function liveMount(i, r) {
     if (!el) return;
     let bars = null;
     try {
-      const res = await api(`/api/klines?symbol=${encodeURIComponent(r.symbol)}&tf=${tf}&limit=${LV_LIMIT[tf]}`);
+      const res = await api(`/api/klines?symbol=${encodeURIComponent(r.symbol)}&tf=${tf}&limit=${LV_LIMIT[tf]}` + mkq("&"));
       if (res.ok) bars = res.bars;
     } catch (e) { /* нижче — запасний варіант */ }
     if (!bars && tf === "4h" && r.chart && r.chart.length > 2) bars = r.chart.map(x => [x[0], x[1], x[2], x[3], x[4], x[5] || 0, true]);
@@ -128,13 +128,13 @@ function lvConnect() {
   clearTimeout(LV.reconnect);
   LV.reconnect = setTimeout(() => {
     const syms = [...new Set([...LV.mounts.values()].map(m => m.symbol.toLowerCase()))].sort();
-    const key = syms.join(",");
+    const key = (S.mk || "c") + ":" + syms.join(",");
     if (key === LV.wsKey && (LV.ws || LV.poll)) return;
     LV.wsKey = key;
     if (LV.ws) { LV.ws.onclose = null; try { LV.ws.close(); } catch (e) { /* */ } LV.ws = null; }
     clearInterval(LV.poll); LV.poll = null;
     if (!syms.length) return;
-    if (window.SMC_NO_WS) { lvStartPoll(); return; }
+    if (window.SMC_NO_WS || S.mk) { lvStartPoll(); return; }   // форекс: свічки з MT5 через додаток
     const streams = syms.flatMap(s => ["4h", "1h", "15m"].map(tf => `${s}@kline_${tf}`)).join("/");
     let opened = false;
     try { LV.ws = new WebSocket(`wss://fstream.binance.com/stream?streams=${streams}`); } catch (e) { lvStartPoll(); return; }
@@ -157,7 +157,7 @@ function lvStartPoll() {
     for (const m of LV.mounts.values()) {
       for (const [tf, c] of Object.entries(m.charts)) {
         try {
-          const res = await api(`/api/klines?symbol=${encodeURIComponent(m.symbol)}&tf=${tf}&limit=10`);
+          const res = await api(`/api/klines?symbol=${encodeURIComponent(m.symbol)}&tf=${tf}&limit=10` + mkq("&"));
           if (res.ok) res.bars.slice(-3).forEach(b => c.update(b));
         } catch (e) { /* наступного разу */ }
       }
@@ -196,7 +196,7 @@ async function lvLoadLtf() {
   clearTimeout(LV.ltfTimer);
   if (LV.mounts.size && $("#tab-screener").classList.contains("active")) {
     try {
-      const r = await api("/api/ltf");
+      const r = await api("/api/ltf" + mkq("?"));
       LV.ltf = r.state || {}; LV.ltfLoaded = true; LV.ltfEnabled = r.enabled;
       LV.mounts.forEach((m, i) => lvRenderLtf(i));
     } catch (e) { /* наступного разу */ }

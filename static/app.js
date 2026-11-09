@@ -10,7 +10,10 @@ const S = {
   res: null, mtime: null, rows: [], market: "futures",
   filter: "all", dir: "all", q: "",
   charts: new Map(), observer: null, busy: false,
+  mk: "",   // яку частину скринера показано: "" — крипто (Binance), "fx" — форекс (MT5)
 };
+try { S.mk = localStorage.getItem("smc_mk") === "fx" ? "fx" : ""; } catch (e) { /* */ }
+function mkq(sep) { return S.mk ? `${sep}market=fx` : ""; }
 
 // ---------------------------------------------------------------- утиліти
 function esc(x) {
@@ -58,9 +61,10 @@ function showMsg(text, err) {
   if (!err) showMsg.t = setTimeout(() => m.classList.add("hidden"), 6000);
 }
 
-const tvTicker = s => "BINANCE%3A" + s + (S.market === "spot" ? "" : ".P");
+const tvTicker = s => S.market === "forex" ? "FX%3A" + s : "BINANCE%3A" + s + (S.market === "spot" ? "" : ".P");
 const tvLink = s => `https://www.tradingview.com/chart/?symbol=${tvTicker(s)}&interval=240`;
-const bnLink = s => S.market === "spot"
+const bnLink = s => S.market === "forex" ? `https://www.tradingview.com/chart/?symbol=FX%3A${s}&interval=60`
+  : S.market === "spot"
   ? `https://www.binance.com/en/trade/${s.replace(/USDT$/, "")}_USDT?type=spot`
   : `https://www.binance.com/en/futures/${s}`;
 
@@ -96,13 +100,13 @@ $$(".tab").forEach(b => b.addEventListener("click", () => openTab(b.dataset.tab)
 // ---------------------------------------------------------------- старт / стоп
 $("#btnRun").addEventListener("click", async () => {
   if (S.busy) return;
-  if (S.running && !confirm("Зупинити скринер? Алерти перестануть приходити.")) return;
+  if (S.running && !confirm(S.mk ? "Зупинити форекс-скринер? Алерти по валютних парах перестануть приходити." : "Зупинити скринер? Алерти перестануть приходити.")) return;
   S.busy = true;
   const btn = $("#btnRun");
   btn.disabled = true;
   btn.textContent = S.running ? "Зупиняю…" : "Запускаю…";
   $("#pill").classList.add("busy");
-  const r = await api(S.running ? "/api/stop" : "/api/start", {});
+  const r = await api((S.running ? "/api/stop" : "/api/start") + mkq("?"), {});
   showMsg(r.message || (r._ok ? "Готово" : "Помилка"), !r._ok);
   S.busy = false;
   $("#pill").classList.remove("busy");
@@ -118,7 +122,7 @@ function renderRun() {
   btn.className = "btn " + (S.running ? "danger" : "primary");
   pill.classList.toggle("on", S.running);
   pill.classList.toggle("off", !S.running);
-  $("#pillText").textContent = S.running ? "Працює" : "Зупинено";
+  $("#pillText").textContent = (S.mk ? "Форекс: " : "") + (S.running ? (S.mk ? "працює" : "Працює") : (S.mk ? "зупинено" : "Зупинено"));
 }
 
 function renderStatusLine() {
@@ -126,8 +130,14 @@ function renderStatusLine() {
   if (!st) return;
   const watch = S.settings ? Number(S.settings.watch) : null;
   const parts = [];
+  if (S.mk && st.fx) {
+    const fx = st.fx;
+    if (!fx.ok) parts.push(`<span style="color:var(--red)">MT5: ${esc(fx.error)}</span>`);
+    else parts.push(`MT5 ${esc(fx.server || "")}: дані свіжі (${fx.age_s} с)` + (fx.missing && fx.missing.length ? ` · немає в брокера: ${esc(fx.missing.join(", "))}` : ""));
+    if (fx.ok && fx.market_open === false) parts.push("форекс-ринок закритий (вихідні) — нових свічок немає");
+  }
   if (st.running) {
-    parts.push(`<b>Скринер працює</b> з ${esc(hhmm(st.started_at))}`);
+    parts.push(`<b>${S.mk ? "Форекс-скринер" : "Скринер"} працює</b> з ${esc(hhmm(st.started_at))}`);
     if (st.last_scan) {
       const ls = st.last_scan;
       let next = "";
@@ -139,7 +149,7 @@ function renderStatusLine() {
       parts.push(`останній скан <b>${esc(ls.time)}</b>: у списку ${ls.rows}, нових ${ls.new}` +
         (ls.errors ? `, помилок ${ls.errors}` : "") + next);
     } else {
-      parts.push("перший скан триває (100 пар ≈ 1–2 хв)");
+      parts.push(S.mk ? "перший скан триває (≈ 1 хв)" : "перший скан триває (100 пар ≈ 1–2 хв)");
     }
     if (st.last_error) parts.push(`<span style="color:var(--red)">помилка скану о ${esc(st.last_error.time)}: ${esc(st.last_error.text)}</span>`);
     if (st.stale) {
@@ -148,7 +158,8 @@ function renderStatusLine() {
         + `скани пропущено (немає мережі?). Після пробудження Mac скан іде сам; якщо попередження не зникає — «Стоп» → «Старт».</span>`);
     }
   } else {
-    parts.push("<b>Скринер зупинено.</b> Натисни «Старт», щоб сканувати й отримувати алерти.");
+    parts.push(S.mk ? "<b>Форекс-скринер зупинено.</b> Натисни «Старт», щоб сканувати валютні пари (MT5 має бути відкритий з роботом SMC_Bridge)."
+      : "<b>Скринер зупинено.</b> Натисни «Старт», щоб сканувати й отримувати алерти.");
     if (st.env && !st.env.screener_found) parts.push(`<span style="color:var(--red)">не знайдено ${esc(st.env.screener_path)} — вкажи шлях у «Налаштуваннях»</span>`);
   }
   $("#statusLine").innerHTML = parts.join(" · ");
@@ -156,7 +167,7 @@ function renderStatusLine() {
 
 async function pollStatus() {
   try {
-    const st = await api("/api/status");
+    const st = await api("/api/status" + mkq("?"));
     const was = S.running;
     S.status = st;
     S.running = !!st.running;
@@ -167,6 +178,7 @@ async function pollStatus() {
       pollLog();
     }
     if (st.running) pollStatus.exitShown = false;
+    renderMarkets(st);
     renderRun();
     renderStatusLine();
     if (was !== S.running) renderStale();
@@ -176,11 +188,36 @@ async function pollStatus() {
   }
 }
 
+// ---------------------------------------------------------------- крипто / форекс
+function renderMarkets(st) {
+  const box = $("#mkSwitch");
+  const on = !!st.fx_enabled;
+  box.hidden = !on && !S.mk;
+  if (!on && S.mk) { setMarket(""); return; }   // форекс вимкнули в «Налаштуваннях»
+  $$("#mkSwitch .mk").forEach(b => b.classList.toggle("on", b.dataset.mk === S.mk));
+  const m = st.markets || {};
+  $("#mkDotC").className = "mk-dot" + (m.crypto ? " run" : "");
+  $("#mkDotF").className = "mk-dot" + (m.fx ? " run" : "");
+}
+function setMarket(mk) {
+  if (mk === S.mk) return;
+  S.mk = mk;
+  try { localStorage.setItem("smc_mk", mk); } catch (e) { /* */ }
+  S.mtime = null; S.rows = []; S.res = null; S.status = null;
+  destroyCharts();
+  $("#tbody").innerHTML = ""; $("#charts").innerHTML = "";
+  $("#statusLine").textContent = "Завантаження…";
+  pollStatus(); pollResults(true); pollLog();
+}
+$$("#mkSwitch .mk").forEach(b => b.addEventListener("click", () => setMarket(b.dataset.mk)));
+
 // ---------------------------------------------------------------- результати
 async function pollResults(force) {
   try {
     const q = (!force && S.mtime) ? `?since=${S.mtime}` : "";
-    const r = await api("/api/results" + q);
+    const mk = S.mk;
+    const r = await api("/api/results" + q + mkq(q ? "&" : "?"));
+    if (mk !== S.mk) return;  // поки чекали відповідь, перемкнули крипто/форекс
     if (r.changed === false) { renderStale(); return; }
     S.res = r;
     S.mtime = r.mtime;
@@ -266,7 +303,7 @@ function renderTable() {
       <td>${esc(r.volume || "-")}</td>
       <td>${esc(r.bos_time || "")}</td>
       <td class="wrap warn">${esc(flags)}</td>
-      <td><a href="${bnLink(r.symbol)}" target="_blank" rel="noopener">Binance</a></td>
+      <td><a href="${bnLink(r.symbol)}" target="_blank" rel="noopener">${S.market === "forex" ? "1h" : "Binance"}</a></td>
     </tr>`;
   }).join("");
   const empty = $("#empty");
@@ -445,7 +482,7 @@ function buildChart(el, r) {
 // ---------------------------------------------------------------- лог
 async function pollLog() {
   if (!$("#logBox").open) return;
-  const r = await api("/api/log?n=400");
+  const r = await api("/api/log?n=400" + mkq("&"));
   const pre = $("#log");
   const atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
   pre.textContent = (r.lines || []).join("\n") || "Лог порожній: скринер ще не запускався з додатка.";
@@ -462,6 +499,23 @@ async function loadSettings() {
   $("#cmdPreview").textContent = r.command || "";
   renderEnv(r.env);
   loadGit();
+  loadFx();
+}
+async function loadFx() {
+  const box = $("#fxState");
+  if (!box) return;
+  try {
+    const r = await api("/api/fx");
+    if (r.ok) {
+      box.innerHTML = `<span class="ok">✓</span> MT5 підключено: <b>${esc(r.server || "сервер")}</b>, дані ${r.age_s} с тому, час сервера UTC${r.offset_h >= 0 ? "+" : ""}${r.offset_h}`
+        + (r.missing && r.missing.length ? ` · <span class="no">немає в брокера: ${esc(r.missing.join(", "))}</span>` : ` · усі ${r.pairs.length} пар є`)
+        + (r.market_open === false ? " · ринок зараз закритий (вихідні)" : "")
+        + `<br><span class="muted small">${esc(r.dir)}</span>`;
+    } else {
+      box.innerHTML = `<span class="no">✗</span> ${esc(r.error || "MT5 не знайдено")}`
+        + (r.enabled ? "" : ' <span class="muted">— інструкція нижче</span>');
+    }
+  } catch (e) { box.textContent = ""; }
 }
 function fillForm(s) {
   const f = $("#setForm");

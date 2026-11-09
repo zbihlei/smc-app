@@ -526,3 +526,15 @@ table.gt td:first-child { white-space: normal; min-width: 90px; }
   .tf3 { grid-template-columns: 1fr; }
   .chart.ch3 { height: 300px; }
 }
+
+/* v1.6 — перемикач «Крипто | Форекс» у вкладці «Скринер» */
+.mk-switch { display: inline-flex; gap: 0; margin: 0 0 10px; border: 1px solid var(--line, #d1d4dc); border-radius: 8px; overflow: hidden; }
+.mk-switch[hidden] { display: none; }
+.mk-switch .mk { border: 0; background: #fff; padding: 6px 16px; font: inherit; cursor: pointer; color: var(--muted); }
+.mk-switch .mk + .mk { border-left: 1px solid var(--line, #d1d4dc); }
+.mk-switch .mk.on { background: #131722; color: #fff; }
+.mk-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #c3c6ce; margin-left: 4px; vertical-align: middle; }
+.mk-dot.run { background: #089981; }
+.fx-howto { margin-top: 6px; }
+.fx-howto ol { margin: 6px 0 4px 18px; padding: 0; }
+.fx-howto li { margin: 3px 0; }

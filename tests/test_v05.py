@@ -134,8 +134,15 @@ started = time.time() - 3 * 3600
 
 
 class FakeScr:
+    name = "крипто"
+    log_path = None
+
     def __init__(self, st):
         self.st = st
+
+    @staticmethod
+    def out_fn(s):
+        return A.results_dir(s)
 
     def status(self):
         return dict(self.st)

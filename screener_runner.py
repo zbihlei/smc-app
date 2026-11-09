@@ -212,6 +212,8 @@ def install_hooks(mod):
     orig_append_log = mod.append_log
 
     def market():
+        if mod.MKT.get("forex"):
+            return "forex"
         return "futures" if mod.MKT.get("futures") else "spot"
 
     def save_json(rows, path, stamp):

@@ -29,6 +29,10 @@
 <main>
   <!-- ======================= СКРИНЕР ======================= -->
   <section id="tab-screener" class="panel active">
+    <div class="mk-switch" id="mkSwitch" hidden>
+      <button type="button" class="mk on" data-mk="">Крипто <span class="mk-dot" id="mkDotC"></span></button>
+      <button type="button" class="mk" data-mk="fx">Форекс <span class="mk-dot" id="mkDotF"></span></button>
+    </div>
     <div class="statusline" id="statusLine">Завантаження…</div>
     <div id="msg" class="msg hidden"></div>
     <div id="zoneAlert" class="zone-alert hidden"></div>
@@ -465,7 +469,27 @@
           <span id="tgMsg" class="muted small"></span>
         </div>
         <p class="muted small">Токен бота береться зі змінної <code>SMC_TG_TOKEN</code> у <code>~/.zshrc</code> — додаток його не зберігає.
-          Після підключення чи вимкнення перезапусти скринер («Стоп» → «Старт»), щоб він підхопив зміну.</p>
+          Після підключення чи вимкнення скринер перезапуститься сам.</p>
+      </fieldset>
+      <fieldset class="wide">
+        <legend>Форекс (MT5)</legend>
+        <div id="fxState" class="tgstate"></div>
+        <label class="ck"><input name="fx_enabled" type="checkbox"> Форекс-скринер: та сама стратегія по валютних парах, дані — з мого MT5 (робот SMC_Bridge)</label>
+        <label>Пари (через кому, лише валютні) <input name="fx_pairs" type="text" spellcheck="false"></label>
+        <label>Папка файлів робота (порожньо — знайти автоматично) <input name="fx_dir" type="text" placeholder="авто"></label>
+        <details class="fx-howto">
+          <summary>Як підключити MT5 (один раз, ≈5 хв)</summary>
+          <ol>
+            <li><a href="/download/SMC_Bridge.mq5" download>Завантаж робота SMC_Bridge.mq5</a>.</li>
+            <li>У MT5: <b>Файл → Відкрити каталог даних</b> → папка <code>MQL5/Experts</code> → скопіюй туди файл.</li>
+            <li>У MT5 відкрий <b>MetaEditor</b> (кнопка IDE або F4), відкрий <code>SMC_Bridge.mq5</code> і натисни <b>Компілювати</b> (F7) — внизу має бути «0 errors».</li>
+            <li>У MT5 у «Навігаторі» → «Експерти» перетягни <b>SMC_Bridge</b> на будь-який графік → OK.
+              Кнопку «Алго-торгівля» вмикати не потрібно: робот угод не відкриває.</li>
+            <li>Тут постав галочку вище, «Зберегти й застосувати», потім у вкладці «Скринер» → «Форекс» → «Старт».</li>
+          </ol>
+          <p class="muted small">Робот раз на хвилину зберігає свічки 4h/1h/15m і кожні 5 с — ціни у спільну папку MT5 (<code>Common/Files/SMC</code>).
+            MT5 має бути відкритий, поки працює форекс-скринер. З п'ятниці ~23:00 до неділі ~23:00 (Київ) ринок закритий — нових свічок немає.</p>
+        </details>
       </fieldset>
       <fieldset class="wide">
         <legend>GitHub</legend>
