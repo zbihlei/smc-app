@@ -103,6 +103,12 @@ since = cc[len(PRE)][0]
 check("без межі в часі: свічки до сетапу дають хибне «сценарій зламано»", REF(cc, SIG)["status"] == "broken")
 check("з межею (закриття BOS на 4h): ті самі свічки ігноруються → злам 15m, лімітка", REF(cc, SIG, since_ms=since)["status"] == "choch",
       REF(cc, SIG, since_ms=since))
+liv = [cc[-1][0] + 900_000, 99, 99.5, 99.2, 99.3, 1.0, False]          # поточна 15m-свічка: ціна вже в зоні 95–100
+r = REF(series(DOWN), SIG, live=liv)
+check("ціна в зоні, а 15m-свічка ще не закрилась → одразу «у зоні — чекаю злам», без «ще не в зоні»",
+      r["status"] == "wait_choch" and "не закрилась" in r["why"] and r.get("trigger") is not None, r)
+check("незакрита свічка поза зоною → як і було, «ціна ще не в зоні»",
+      REF(series(DOWN), SIG, live=[liv[0], 105, 106, 104, 105, 1, False])["status"] == "wait_zone")
 row4 = {"chart": [[1_000_000 + i * 14_400_000, 1, 1, 1, 1] for i in range(10)], "bos_bars_ago": 3, "tf_ms": 14_400_000}
 check("момент BOS із даних сигналу: остання закрита 4h − bos_bars_ago, + 4h (закриття свічки BOS)",
       ltf.sig_since(row4) == 1_000_000 + 9 * 14_400_000 - 3 * 14_400_000 + 14_400_000 and ltf.sig_since({}) is None)

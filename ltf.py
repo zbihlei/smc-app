@@ -106,19 +106,27 @@ def sig_since(r):
     return None
 
 
-def refine(c15, sig, tol_pct=0.0, buffer_pct=0.05, n=2, min_stop_atr=0.6, min_rr=3.0, since_ms=None):
+def refine(c15, sig, tol_pct=0.0, buffer_pct=0.05, n=2, min_stop_atr=0.6, min_rr=3.0, since_ms=None, live=None):
     """c15 — ЗАКРИТІ свічки 15m [[t,o,h,l,c,...]], sig — сигнал скринера (dir, zone_low, zone_high, stop, target).
-    Повертає dict зі статусом і рівнями (див. опис модуля)."""
+    live — поточна (незакрита) 15m-свічка: лише щоб одразу показати «ціна в зоні», не чекаючи закриття свічки.
+    Злам структури й рівні — тільки по закритих свічках. Повертає dict зі статусом і рівнями (див. опис модуля)."""
     d = 1 if sig["dir"] == "Long" else -1
     zl, zh, S4, TG = sig["zone_low"], sig["zone_high"], sig["stop"], sig["target"]
     out = {"status": "wait_zone", "dir": sig["dir"]}
     if since_ms is not None:          # лише свічки після підтвердження сетапу (закриття BOS на 4h)
         c15 = [x for x in c15 if x[0] >= since_ms]
-    if len(c15) < 2 * n + 5:
-        return out
     touch = (lambda k: c15[k][3] <= zh) if d == 1 else (lambda k: c15[k][2] >= zl)
-    i0 = next((k for k in range(len(c15)) if touch(k)), None)
+    i0 = next((k for k in range(len(c15)) if touch(k)), None) if len(c15) >= 2 * n + 5 else None
     if i0 is None:
+        if live is not None and (since_ms is None or live[0] >= since_ms) and ((live[3] <= zh) if d == 1 else (live[2] >= zl)):
+            # ціна вже в зоні, але 15m-свічка ще не закрилась: показуємо одразу, злам шукатимемо по закритих
+            out.update(status="wait_choch", touch_t=live[0])
+            hs, ls = swings(c15, n) if len(c15) >= 2 * n + 1 else ([], [])
+            piv = hs if d == 1 else ls
+            if piv:
+                out.update(trigger=piv[-1][1], trigger_t=c15[piv[-1][0]][0])
+            out["why"] = "у зоні 4h (15m-свічка ще не закрилась) — чекаю злам 15m" + (
+                f" {'вище' if d == 1 else 'нижче'} {out['trigger']:g}" if "trigger" in out else "")
         return out
     out["touch_t"] = c15[i0][0]
     # ідемо свічка за свічкою: оновлюємо екстремум у зоні і шукаємо закриття за останнім свінгом перед ним
@@ -223,9 +231,11 @@ class LtfWatcher:
             try:
                 key = sig_key(r)
                 fk = self.fetch or fetch_klines
-                c15 = [x for x in fk(r["symbol"], "15m", 200, self.base) if x[6]]
+                raw15 = fk(r["symbol"], "15m", 200, self.base)
+                c15 = [x for x in raw15 if x[6]]
+                live = raw15[-1] if raw15 and not raw15[-1][6] else None
                 c1h = [x for x in fk(r["symbol"], "1h", 120, self.base) if x[6]]
-                res = refine(c15, r, self.get_tol(), since_ms=sig_since(r), **(self.get_opts() or {}))
+                res = refine(c15, r, self.get_tol(), since_ms=sig_since(r), live=live, **(self.get_opts() or {}))
                 res["ctx_1h"] = structure(c1h, 3)
                 res["status_txt"] = STATUS_TXT.get(res["status"], res["status"])
                 new_state[key] = res
