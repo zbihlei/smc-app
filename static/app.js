@@ -323,11 +323,13 @@ function renderTiles() {
   const rows = visibleRows();
   $("#tiles").innerHTML = rows.map(r => {
     const warn = (r.flags || []).length ? `<span class="t-warn" title="${esc((r.flags || []).join("; "))}">⚠ ${(r.flags || []).length}</span>` : "";
+    const btc = (r.flags || []).find(f => f.startsWith("BTC різко"));
     return `<div class="tile s${r.rank}${r.hot ? " hot" : ""}" data-i="${r.idx}">
       <div class="t-top"><a class="sym" href="${tvLink(r.symbol)}" target="_blank" rel="noopener">${esc(r.symbol.replace(/USDT$/, ""))}</a>
         <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.hot ? '<span class="t-hot" title="сильний сетап">★</span>' : ""}</div>
       <div class="t-st act${r.rank}">${esc(r.rank === 0 ? "у зоні" : r.status)}${r.zone_type === "брейкер" ? ' · <span class="tag amber">брейкер</span>' : ""}</div>
       <div class="t-lv"><span>вхід</span><b>${fmt(r.entry)}</b><span>стоп</span><b>${fmt(r.stop)}</b><span>ціль</span><b>${fmt(r.target)}</b></div>
+      ${btc ? `<div class="t-btc" title="${esc(btc)}">₿ ${esc(btc.split(" — ")[0].replace("BTC різко ", ""))}${btc.includes("ПРОТИ") ? " · проти угоди" : ""}</div>` : ""}
       <div class="t-ft"><b>R:R ${fix(r.rr, 1)}</b><span>бали ${esc(r.score)}</span><span>${r.rank === 0 ? "" : fix(r.dist, 1) + "%"}</span>${warn}</div>
     </div>`;
   }).join("");
@@ -350,6 +352,12 @@ $("#tiles").addEventListener("click", e => {
   if (t) jumpTo(+t.dataset.i);
 });
 applyView();
+$("#btnRefresh").addEventListener("click", () => {
+  $("#msg").classList.add("hidden");
+  S.mtime = null;
+  pollStatus(); pollResults(true); pollLog();
+  if (typeof lvLoadLtf === "function") lvLoadLtf();
+});
 $("#btnScanNow").addEventListener("click", async () => {
   const r = await api("/api/scan_now" + mkq("?"), {}).catch(e => ({ message: String(e) }));
   showMsg(r.message || "Готово", !r._ok);

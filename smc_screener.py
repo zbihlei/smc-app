@@ -8,6 +8,7 @@ SMC-скринер v1: шукає на Binance (USDT-пари, 4h) кандид�
   4) вхід від середини зони, стоп за межею зони, ціль на найближчому свінгу;
   5) R:R не менше заданого (за замовчуванням 3);
   7) v2.7: допуск входу --entry-tol N (% висоти зони): ціна не завжди доходить рівно до середини блока;
+  9) v2.9: попередження про різкий рух BTC (--btc-warn 1.5: % за ~1 год, ×2 за ~4 год) у флагах сигналів і алертах.
   8) v2.8: ордерблок — ТІЛО свічки (--ob-zone body, за замовчуванням); стоп — за гнотом свічки ОБ; уся свічка: --ob-zone candle.
   6) v2.6: брейкер-блоки — пробитий ордерблок протилежного напрямку, якщо пробій дав BOS (вимкнути: --no-breakers).
 
@@ -970,6 +971,10 @@ def selftest():
     zb_ = build_zone(c, [e for e in events if e["dir"] == 1 and e["idx"] == 17][0], {"ob_zone": "body"})
     check("v2.8: ордерблок по тілу — зона 99.0-99.8 (open-close), гноти 98.7/100.1 окремо",
           (zb_["zl"], zb_["zh"], zb_["xl"], zb_["xh"]) == (99.0, 99.8, 98.7, 100.1), str(zb_))
+    _m = {"price": 1, "h1": -2.1, "h4": -2.5}
+    check("v2.9: BTC −2.1% за 1 год → для Long «проти угоди», для Short «у бік угоди»",
+          "ПРОТИ угоди" in btc_flag(_m, 1) and "у бік угоди" in btc_flag(_m, -1) and "−" not in btc_flag(_m, 1)
+          and btc_flag({"price": 1, "h1": 0.4, "h4": 1.0}, 1) == "" and "за 4 год" in btc_flag({"price": 1, "h1": 0.5, "h4": 3.4}, -1))
     check("v2.8: доджі (тіло < 10% свічки) — зона на всю свічку",
           ob_bounds({"o": 100.0, "c": 100.01, "l": 99.0, "h": 101.0}, "body") == (99.0, 101.0, 99.0, 101.0))
     _rb = analyze_symbol("DEMOUSDT", c, 100.4, dict(cfg, ob_zone="body", min_stop_atr=0, min_rr=1.0))
@@ -1211,7 +1216,56 @@ def scan(a, cfg, verbose=True):
             print(f"  {i}/{len(symbols)}")
         time.sleep(0.08)
     rows.sort(key=lambda r: (-r["score"], r["rank"], r["dist"], -r["rr"]))
+    apply_btc(rows)
     return rows, errors
+
+
+# ----------------------------------------------------------------------------
+# v2.9: різкий рух біткоїна — попередження (крипторинок сильно корельований з BTC)
+# ----------------------------------------------------------------------------
+BTC_WARN = 1.5      # % за ~1 год (за 4 год поріг ×2); 0 — вимкнено. Командний рядок: --btc-warn
+_BTC = {"t": 0.0, "v": None}
+
+
+def btc_move(max_age=60):
+    """Зміна BTCUSDT: за ~1 год (від закриття попередньої години) і за ~4 год, %. Кеш max_age с. None — немає даних."""
+    if MKT.get("forex") or BTC_WARN <= 0:
+        return None
+    if _BTC["v"] is not None and time.time() - _BTC["t"] < max_age:
+        return _BTC["v"]
+    try:
+        k = fetch_klines("BTCUSDT", "1h", 6)
+        now = k[-1]["c"]
+        v = {"price": now, "h1": (now / k[-2]["c"] - 1) * 100, "h4": (now / k[-5]["c"] - 1) * 100}
+    except Exception:
+        v = None
+    _BTC.update(t=time.time(), v=v)
+    return v
+
+
+def btc_flag(m, d):
+    """Текст попередження для сигналу напрямку d (1 — Long, -1 — Short), якщо BTC рухається різко; інакше ""."""
+    if not m:
+        return ""
+    big1, big4 = abs(m["h1"]) >= BTC_WARN, abs(m["h4"]) >= 2 * BTC_WARN
+    if not (big1 or big4):
+        return ""
+    ch = m["h1"] if big1 else m["h4"]
+    per = "1 год" if big1 else "4 год"
+    move = "падає" if ch < 0 else "росте"
+    against = (ch < 0 and d == 1) or (ch > 0 and d == -1)
+    tail = "ПРОТИ угоди — альти зазвичай ідуть за ним" if against else "у бік угоди, але після різкого руху можливий відкат"
+    return f"BTC різко {move}: {ch:+.1f}% за {per} — {tail}"
+
+
+def apply_btc(rows):
+    """Оновити попередження про BTC у флагах сигналів (старе прибирається, нове додається на початок)."""
+    m = btc_move()
+    for r in rows:
+        fl = [f for f in r.get("flags", []) if not f.startswith("BTC різко")]
+        t = btc_flag(m, 1 if r["dir"] == "Long" else -1)
+        r["flags"] = ([t] if t else []) + fl
+    return m
 
 
 STRUCT_SHORT = {1: "вгору", -1: "вниз", 0: "змішана"}
@@ -1411,6 +1465,8 @@ def main():
     p.add_argument("--entry-tol", type=float, default=0.0, metavar="N",
                    help="допуск входу: лімітка на N%% висоти зони ближче до краю, з якого приходить ціна (0 = рівно середина; 50 = край)")
     p.add_argument("--rr-at-limit", action="store_true", help="мін. R:R перевіряти від лімітки з допуском (за замовч. — від середини зони)")
+    p.add_argument("--btc-warn", type=float, default=1.5,
+                   help="попередження, якщо BTC змінився більш ніж на N%% за ~1 год (або 2N%% за ~4 год); 0 — вимкнено (v2.9)")
     p.add_argument("--ob-zone", choices=["body", "candle"], default="body",
                    help="межі ордерблока: body — тіло свічки (за замовч., v2.8), candle — уся свічка з гнотами")
     p.add_argument("--no-breakers", action="store_true", help="не шукати брейкер-блоки (пробиті ордерблоки, що стали зоною в інший бік)")
@@ -1435,6 +1491,8 @@ def main():
                    help="показати підсумок за день із signals_log.csv (без аргументу — сьогодні) і вийти")
     p.add_argument("--selftest", action="store_true", help="перевірка логіки на синтетичних даних без мережі")
     a = p.parse_args()
+    global BTC_WARN
+    BTC_WARN = max(0.0, a.btc_warn)
 
     if a.selftest:
         sys.exit(selftest())

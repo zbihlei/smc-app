@@ -179,7 +179,8 @@ c4 = FB.candle("BTCUSDT", "4h", t4)
 zl, zh = float(c4[3]), float(c4[2])
 row = {"symbol": "BTCUSDT", "dir": "Long", "status": "підхід до зони", "rank": 1, "score": 1, "price": zh * 1.03,
        "zone_low": zl, "zone_high": zh, "entry": (zl + zh) / 2, "stop": zl * 0.99, "target": zh * 1.2, "rr": 4.1, "dist": 2.0,
-       "zone_t": t4, "tf_ms": 14_400_000, "zone_type": "OB", "flags": []}
+       "zone_t": t4, "tf_ms": 14_400_000, "zone_type": "OB",
+       "flags": ["BTC різко падає: -2.4% за 1 год — ПРОТИ угоди — альти зазвичай ідуть за ним"]}
 with open(os.path.join(res, "latest_app.json"), "w", encoding="utf-8") as f:
     json.dump({"generated": "08.11 12:00", "count": 1, "candidates": [row]}, f)
 app = subprocess.Popen([sys.executable, os.path.join(APP, "app.py"), "--port", str(PORT), "--no-browser"],
@@ -229,6 +230,10 @@ try:
         expect(pg.locator("#liveBadge")).to_contain_text("15 с", timeout=5000)
         check("без WebSocket — оновлення опитуванням кожні 15 с (видно в заголовку)", True)
         pg.screenshot(path=os.path.join(shots, "ltf_charts.png"), full_page=True)
+        check("блок: попередження про різкий рух BTC (₿ … проти угоди)", "проти угоди" in pg.inner_text("#tiles .tile .t-btc"))
+        pg.click("#btnRefresh")
+        pg.wait_for_timeout(800)
+        check("«⟳ Оновити»: список і графіки на місці, без помилок", pg.locator("#tiles .tile").count() == 1 and not errors, errors[:2])
         pg.click("#c0 .cfold")
         check("картку графіків можна згорнути (лишається заголовок)", "folded" in pg.get_attribute("#c0", "class") and pg.locator("#ch0").is_hidden()
               and pg.locator("#c0 .hd").is_visible())

@@ -140,6 +140,22 @@ check("повний скан: «у зоні» по зоні, де вже був 
 scr.alert_new([dict(row, status="у зоні (1-й дотик)", rank=0, zone_low=0.0450, zone_high=0.0455)], seen)
 check("нова зона тієї ж монети — алерт приходить", len(got) == 1 and "WLFIUSDT" in got[0], got)
 
+# ---- 6b. різкий рух BTC: попередження в живому алерті (свіже, на момент входу в зону)
+scr._BTC.update(t=0.0, v=None)
+scr.fetch_klines = lambda sym, itv, lim: [{"t": i, "o": 100, "h": 100, "l": 100, "c": c, "v": 1, "closed": True}
+                                          for i, c in enumerate([100, 100, 100, 100, 100, 97.6])]
+full = []
+scr.notify = lambda title, text, kind="new", speak="", ticker="": full.append(text)
+scr.fetch_prices = lambda: {"XYZUSDT": 1.0}
+lw(a, [dict(row, symbol="XYZUSDT", dir="Long", zone_low=0.99, zone_high=1.01, entry=1.0, stop=0.98, target=1.1, flags=[])], seen)
+check("BTC −2.4% за 1 год → у живому алерті Long «BTC різко падає … ПРОТИ угоди»",
+      len(full) == 1 and "BTC різко падає: -2.4% за 1 год — ПРОТИ угоди" in full[0], full)
+scr._BTC.update(t=0.0, v=None)
+scr.fetch_klines = lambda sym, itv, lim: [{"t": i, "o": 100, "h": 100, "l": 100, "c": 100.3, "v": 1, "closed": True} for i in range(6)]
+rr = [dict(row, flags=["BTC різко падає: старе", "тісний стоп"])]
+scr.apply_btc(rr)
+check("BTC спокійний → старе попередження прибрано, інші лишаються", rr[0]["flags"] == ["тісний стоп"], rr[0]["flags"])
+
 # ---- 7. «Сканувати зараз»: прапорець від додатка перериває очікування між сканами
 open(os.path.join(out, R.SCAN_NOW_FILE), "w").close()
 t0 = time.time()

@@ -157,6 +157,11 @@ def make_live_wait(mod):
             touched = mod.live_touches(live_rows, prices, fired)
             if touched:
                 fired_add(out_dir, [mod.live_key(r) for r, _ in touched])
+            if touched and hasattr(mod, "apply_btc"):
+                try:   # свіже попередження про різкий рух BTC саме на момент входу в зону
+                    mod.apply_btc([r for r, _ in touched])
+                except Exception:
+                    pass
             for r, px in touched:
                 mod.fire_live(a, r, px, seen_path, dt.datetime.now().strftime("%H:%M"))
                 r.update(status="у зоні (1-й дотик)", rank=0, price=px, dist=0.0)
