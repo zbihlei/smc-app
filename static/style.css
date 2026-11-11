@@ -588,3 +588,6 @@ tr.hot td:first-child { box-shadow: inset 4px 0 0 #f0a500; }
 .tile.s0.btc-against { background: #eef6f2; }
 .tile .t-btc.with { color: #475467; background: #eef0f4; }
 @media (max-width: 520px) { .tgrid { grid-template-columns: 1fr 1fr; } }
+
+/* v1.8.3 — перемикач спливаючих вікон */
+#btnPopup.off { color: var(--muted); background: #f3f4f6; }

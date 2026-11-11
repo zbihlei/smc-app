@@ -200,6 +200,16 @@ try:
         sw = pg.evaluate("document.documentElement.scrollWidth")
         check("вузьке вікно без горизонтальної прокрутки сторінки", sw <= 392)
         pg.set_viewport_size({"width": 1440, "height": 1000})
+        was = "--popup" in json.load(urllib.request.urlopen(URL + "/api/settings", timeout=5))["command"]
+        lbl0 = pg.inner_text("#btnPopup")
+        pg.click("#btnPopup")
+        expect(pg.locator("#btnPopup")).not_to_have_text(lbl0, timeout=8000)
+        now_cmd = json.load(urllib.request.urlopen(URL + "/api/settings", timeout=5))["command"]
+        check("кнопка «Вікна»: перемикає спливаючі вікна (підпис і команда скринера змінюються)",
+              ("--popup" in now_cmd) != was and ("вимк" in pg.inner_text("#btnPopup")) == was, (lbl0, pg.inner_text("#btnPopup")))
+        pg.click("#btnPopup")
+        expect(pg.locator("#btnPopup")).to_have_text(lbl0, timeout=8000)
+        check("ще один клік — повертає як було", ("--popup" in json.load(urllib.request.urlopen(URL + "/api/settings", timeout=5))["command"]) == was)
         r = pg.request.post(URL + "/api/scan_now", headers={"X-SMC-App": "1"}, data="{}")
         check("«Сканувати зараз», коли скринер зупинено, — пояснення «натисни Старт»", r.status == 409 and "Старт" in r.json()["message"])
         pg.click("#btnClear")   # підтвердження приймає загальний обробник діалогів

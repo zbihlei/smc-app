@@ -393,6 +393,27 @@ $("#btnRefresh").addEventListener("click", () => {
   pollStatus(); pollResults(true); pollLog();
   if (typeof lvLoadLtf === "function") lvLoadLtf();
 });
+// спливаючі вікна алертів: швидкий перемикач (те саме, що «Спливаюче вікно» в «Налаштуваннях»)
+function renderPopupBtn() {
+  const on = !(S.settings && S.settings.popup === false);
+  const b = $("#btnPopup");
+  b.textContent = on ? "🔔 Вікна: увімк." : "🔕 Вікна: вимк.";
+  b.classList.toggle("off", !on);
+}
+$("#btnPopup").addEventListener("click", async () => {
+  const b = $("#btnPopup");
+  const on = !(S.settings && S.settings.popup === false);
+  b.disabled = true;
+  try {
+    const r = await api("/api/settings", { settings: { popup: !on } });
+    if (r.settings) { S.settings = r.settings; fillForm(r.settings); }
+    renderPopupBtn();
+    showMsg(!on ? "Спливаючі вікна увімкнено." + (r.restarted ? " Скринер перезапущено." : "")
+      : "Спливаючі вікна вимкнено — алерти приходитимуть банером, звуком і в Telegram." + (r.restarted ? " Скринер перезапущено." : ""), false);
+  } catch (e) { showMsg(String(e), true); }
+  finally { b.disabled = false; }
+});
+api("/api/settings").then(r => { S.settings = r.settings; renderPopupBtn(); }).catch(() => {});
 $("#btnScanNow").addEventListener("click", async () => {
   const r = await api("/api/scan_now" + mkq("?"), {}).catch(e => ({ message: String(e) }));
   showMsg(r.message || "Готово", !r._ok);
@@ -606,6 +627,7 @@ async function loadSettings() {
   S.settings = r.settings;
   fillForm(r.settings);
   $("#cmdPreview").textContent = r.command || "";
+  renderPopupBtn();
   renderEnv(r.env);
   loadGit();
   loadFx();
@@ -656,6 +678,7 @@ $("#setForm").addEventListener("submit", async e => {
   if (r.ok) {
     const wasLive = liveOn();
     S.settings = r.settings;
+    renderPopupBtn();
     if (wasLive !== liveOn()) renderCharts();
     m.textContent = r.message; m.style.color = "var(--green)";
     $("#cmdPreview").textContent = r.command || "";
