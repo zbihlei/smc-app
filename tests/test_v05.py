@@ -258,5 +258,17 @@ if REAL:
     finally:
         srv.terminate()
 
+# ---- помилка скану в рядку статусу: лише якщо після неї ще не було успішного скану
+_lg = os.path.join(tempfile.mkdtemp(), "s.log")
+_err = "[18:36] помилка скану: https://fapi.binance.com: HTTPSConnectionPool(host='fapi.binance.com', port=443): Max retries exceeded (Caused by NameResolutionError(\"Failed to resolve 'fapi.binance.com'\"))"
+open(_lg, "w", encoding="utf-8").write("[18:05] у списку: 5, нових: 0\n" + _err + "\n")
+i1 = A.last_scan_info(_lg)
+check("помилка після останнього скану — показується, простими словами (без технічного тексту)",
+      i1["last_error"] and i1["last_error"]["time"] == "18:36" and "немає з'єднання з інтернетом" in i1["last_error"]["text"]
+      and "HTTPSConnectionPool" not in i1["last_error"]["text"] and i1["last_scan"]["time"] == "18:05", i1)
+open(_lg, "a", encoding="utf-8").write("[19:05] у списку: 6, нових: 1\n")
+i2 = A.last_scan_info(_lg)
+check("наступний скан вдався — стара помилка зі статусу зникає сама", i2["last_error"] is None and i2["last_scan"]["time"] == "19:05", i2)
+
 print("\nПІДСУМОК: " + ("усі перевірки пройдено" if ok else "Є ПОМИЛКИ"))
 sys.exit(0 if ok else 1)

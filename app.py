@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.8.1"
+APP_VERSION = "1.8.2"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -564,13 +564,24 @@ def last_scan_info(path=None):
             if m:
                 info["last_scan"] = {"time": m.group(1), "rows": int(m.group(2)), "new": int(m.group(3)),
                                      "errors": int(m.group(4) or 0)}
-        if info["last_error"] is None:
-            m = ERR_RE.match(line)
-            if m:
-                info["last_error"] = {"time": m.group(1), "text": m.group(2)[:300]}
-        if info["last_scan"] and info["last_error"]:
-            break
+        if info["last_scan"] is not None:
+            break       # помилки, старші за останній успішний скан, уже неактуальні — не показуємо
+        m = ERR_RE.match(line)
+        if m and info["last_error"] is None:
+            info["last_error"] = {"time": m.group(1), "text": friendly_error(m.group(2))}
     return info
+
+
+def friendly_error(text):
+    """Технічну помилку мережі — простими словами (повний текст лишається в лозі скринера)."""
+    t = text or ""
+    if "NameResolutionError" in t or "Failed to resolve" in t or "nodename nor servname" in t or "getaddrinfo" in t:
+        return "немає з'єднання з інтернетом (не вдалося знайти сервер біржі) — скринер повторить сам"
+    if "timed out" in t.lower() or "Timeout" in t:
+        return "біржа не відповіла вчасно — скринер повторить сам"
+    if "Connection" in t and ("refused" in t or "reset" in t or "aborted" in t):
+        return "з'єднання з біржею обірвалось — скринер повторить сам"
+    return t[:300]
 
 
 def read_results(s, since=None, d=None):
