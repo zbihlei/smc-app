@@ -40,7 +40,8 @@ function lvChart(el, r, tf, bars) {
   pl(r.target, "#089981", "Ціль", 2);
   // зона 4h — напівпрозорий прямокутник від свічки зони (або на всю ширину на молодших ТФ)
   const mk = css => { const e = document.createElement("div"); e.style.cssText = "position:absolute;pointer-events:none;z-index:3;" + css; el.appendChild(e); return e; };
-  st.zoneD = mk("background:rgba(150,150,150,0.30);");
+  st.zoneD = mk(r.zone_type === "брейкер" ? "background:rgba(242,54,69,0.26);border:1px solid rgba(242,54,69,0.55);" : "background:rgba(150,150,150,0.30);");
+  st.zoneD.dataset.zone = r.zone_type === "брейкер" ? "breaker" : "ob";
   st.midD = mk("border-top:1px dashed #9c27b0;height:0;");
   st.riskD = mk("background:rgba(120,123,134,0.40);");
   st.rewD = mk("background:rgba(77,182,205,0.40);color:#0b3c49;font:11px -apple-system,Arial;padding:1px 4px;overflow:hidden;white-space:nowrap;");

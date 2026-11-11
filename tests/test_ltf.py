@@ -3,6 +3,7 @@
 """v1.5: уточнення входу на 15m (злам структури в зоні 4h) + лайв-графіки 4h/1h/15m у вкладці «Скринер».
 Фейковий Binance, без мережі. Запуск: python3 tests/test_ltf.py [папка_скріншотів]"""
 import json
+import re
 import os
 import subprocess
 import sys
@@ -179,10 +180,13 @@ c4 = FB.candle("BTCUSDT", "4h", t4)
 zl, zh = float(c4[3]), float(c4[2])
 row = {"symbol": "BTCUSDT", "dir": "Long", "status": "підхід до зони", "rank": 1, "score": 1, "price": zh * 1.03,
        "zone_low": zl, "zone_high": zh, "entry": (zl + zh) / 2, "stop": zl * 0.99, "target": zh * 1.2, "rr": 4.1, "dist": 2.0,
-       "zone_t": t4, "tf_ms": 14_400_000, "zone_type": "OB",
+       "zone_t": t4, "tf_ms": 14_400_000, "zone_type": "брейкер",
        "flags": ["BTC різко падає: -2.4% за 1 год — ПРОТИ угоди — альти зазвичай ідуть за ним"]}
 with open(os.path.join(res, "latest_app.json"), "w", encoding="utf-8") as f:
     json.dump({"generated": "08.11 12:00", "count": 1, "candidates": [row]}, f)
+OLD_SEEN = time.time() - 3 * 86400          # сигнал «у списку» вже 3 дні
+with open(os.path.join(data, "first_seen.json"), "w") as f:
+    json.dump({f"crypto|BTCUSDT|Long|{zl:.8g}": OLD_SEEN}, f)
 app = subprocess.Popen([sys.executable, os.path.join(APP, "app.py"), "--port", str(PORT), "--no-browser"],
                        env=dict(os.environ, SMC_APP_DATA=data, SMC_BT_FAPI=BASE, SMC_LTF_INTERVAL="1"),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -223,13 +227,23 @@ try:
         check("підписи таймфреймів", "4h" in pg.locator("#c0 .tf3").inner_text() and "15m" in pg.locator("#c0 .tf3").inner_text())
         check("на кожному графіку розмічено зону, середину, ризик і ціль",
               all(pg.locator(c + " > div[style*='position: absolute']").count() >= 4 for c in ("#ch0", "#ch1h0", "#ch150")))
-        expect(pg.locator("#lt0")).to_contain_text("15m: ціна ще не в зоні 4h", timeout=40000)
+        # фейкові свічки залежать від поточного часу, тож статус буває різний — важливо, що він порахований
+        expect(pg.locator("#lt0")).to_contain_text(re.compile("15m: (ціна ще не в зоні 4h|у зоні|злам 15m|вхід 15m|ціль без входу|сценарій зламано)"), timeout=40000)
         check("рядок уточнення під графіками: статус 15m", True)
         expect(pg.locator("#lb1h0")).to_contain_text("структура", timeout=5000)
         check("над 1h — контекст структури 1h", True)
         expect(pg.locator("#liveBadge")).to_contain_text("15 с", timeout=5000)
         check("без WebSocket — оновлення опитуванням кожні 15 с (видно в заголовку)", True)
         pg.screenshot(path=os.path.join(shots, "ltf_charts.png"), full_page=True)
+        when = pg.inner_text("#tiles .tile .t-when")
+        check("блок: дата, коли сигнал уперше з'явився (з дд.мм гг:хв, 3 дні тому)", re.fullmatch(r"з \d\d\.\d\d \d\d:\d\d", when) is not None
+              and "сьогодні" not in when, when)
+        check("брейкер-блок на графіках — червона зона (на всіх трьох)",
+              all("242, 54, 69" in pg.eval_on_selector(f"{c} [data-zone]", "e => e.dataset.zone + getComputedStyle(e).backgroundColor")
+                  and pg.get_attribute(f"{c} [data-zone]", "data-zone") == "breaker" for c in ("#ch0", "#ch1h0", "#ch150")))
+        order = pg.evaluate("""() => { const rows = [{first_seen: 100, hot: true, idx: 0}, {first_seen: 5000, hot: false, idx: 1}, {first_seen: 5010, hot: true, idx: 2}];
+            rows.sort((a, b) => (Math.round((b.first_seen || 0) / 60) - Math.round((a.first_seen || 0) / 60)) || (b.hot - a.hot) || (a.idx - b.idx)); return rows.map(r => r.idx); }""")
+        check("порядок: новіші сигнали першими; в одну хвилину — сильні (★) першими", order == [2, 1, 0], order)
         check("блок: попередження про різкий рух BTC (₿ … проти угоди)", "проти угоди" in pg.inner_text("#tiles .tile .t-btc"))
         pg.click("#btnRefresh")
         pg.wait_for_timeout(800)

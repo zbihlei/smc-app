@@ -224,7 +224,8 @@ async function pollResults(force) {
     const data = r.data || {};
     S.market = data.market || "futures";
     S.rows = (data.candidates || []).map((x, i) => Object.assign({}, x, { idx: i, rank: rankOf(x), hot: Number(x.score) >= HOT }));
-    S.rows.sort((a, b) => (b.hot - a.hot) || (a.idx - b.idx));   // сильні сетапи (бали ≥ HOT) — угорі
+    // найновіші сигнали — першими (угорі списку графіків, ліворуч у блоках); серед однакових за часом — сильні (★) першими
+    S.rows.sort((a, b) => (Math.round((b.first_seen || 0) / 60) - Math.round((a.first_seen || 0) / 60)) || (b.hot - a.hot) || (a.idx - b.idx));
     renderAll();
   } catch (e) { /* статус покаже проблему зі зв'язком */ }
 }
@@ -319,6 +320,11 @@ function renderTable() {
 // ---------------------------------------------------------------- блоки (за замовчуванням) / таблиця
 const HOT = 2;   // бали, від яких сетап виділяється рамкою й іде вгору списку
 try { S.view = localStorage.getItem("smc_view") === "table" ? "table" : "tiles"; } catch (e) { S.view = "tiles"; }
+function seenText(ts) {
+  const d = new Date(ts * 1000), p = n => String(n).padStart(2, "0");
+  const today = new Date().toDateString() === d.toDateString();
+  return (today ? "сьогодні" : `${p(d.getDate())}.${p(d.getMonth() + 1)}`) + ` ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 function renderTiles() {
   const rows = visibleRows();
   $("#tiles").innerHTML = rows.map(r => {
@@ -330,6 +336,7 @@ function renderTiles() {
       <div class="t-st act${r.rank}">${esc(r.rank === 0 ? "у зоні" : r.status)}${r.zone_type === "брейкер" ? ' · <span class="tag amber">брейкер</span>' : ""}</div>
       <div class="t-lv"><span>вхід</span><b>${fmt(r.entry)}</b><span>стоп</span><b>${fmt(r.stop)}</b><span>ціль</span><b>${fmt(r.target)}</b></div>
       ${btc ? `<div class="t-btc" title="${esc(btc)}">₿ ${esc(btc.split(" — ")[0].replace("BTC різко ", ""))}${btc.includes("ПРОТИ") ? " · проти угоди" : ""}</div>` : ""}
+      ${r.first_seen ? `<div class="t-when" title="коли сигнал уперше з'явився у списку">з ${esc(seenText(r.first_seen))}</div>` : ""}
       <div class="t-ft"><b>R:R ${fix(r.rr, 1)}</b><span>бали ${esc(r.score)}</span><span>${r.rank === 0 ? "" : fix(r.dist, 1) + "%"}</span>${warn}</div>
     </div>`;
   }).join("");
@@ -526,7 +533,7 @@ function buildChart(el, r) {
     : [{ time: last, value: d.px }, { time: last + 4 * d.tf, value: d.entry }, { time: last + 16 * d.tf, value: d.target }]);
 
   const mk = css => { const e = document.createElement("div"); e.style.cssText = "position:absolute;pointer-events:none;z-index:3;" + css; el.appendChild(e); return e; };
-  const zoneD = mk("background:rgba(150,150,150,0.35);");
+  const zoneD = mk(r.zone_type === "брейкер" ? "background:rgba(242,54,69,0.28);border:1px solid rgba(242,54,69,0.55);" : "background:rgba(150,150,150,0.35);");
   const midD = mk("border-top:1px dashed #9c27b0;height:0;");
   const riskD = mk("background:rgba(120,123,134,0.45);");
   const rewD = mk("background:rgba(77,182,205,0.45);color:#0b3c49;font:12px -apple-system,Arial;padding:2px 6px;");

@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.7.1"
+APP_VERSION = "1.7.2"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -595,6 +595,44 @@ def read_results(s, since=None, d=None):
         return {"changed": True, "source": source, "mtime": mtime, "path": p,
                 "age_s": max(0, time.time() - mtime), "data": data}
     return {"changed": True, "source": "none", "mtime": None, "dir": d}
+
+
+FIRST_SEEN_PATH = os.path.join(DATA_DIR, "first_seen.json")
+_FS_LOCK = threading.Lock()
+
+
+def stamp_first_seen(res, market):
+    """Дописати кожному сигналу first_seen — коли додаток уперше побачив його у списку (монета+напрям+зона).
+    Пам'ять у data/first_seen.json, 14 днів. Для блоків: дата сигналу й «нові — першими»."""
+    rows = (res.get("data") or {}).get("candidates") if isinstance(res.get("data"), dict) else None
+    if not rows:
+        return res
+    with _FS_LOCK:
+        try:
+            with open(FIRST_SEEN_PATH, encoding="utf-8") as f:
+                fs = json.load(f)
+        except (OSError, ValueError):
+            fs = {}
+        now, changed = time.time(), False
+        for r in rows:
+            try:
+                k = f"{market}|{r['symbol']}|{r['dir']}|{float(r['zone_low']):.8g}"
+            except (KeyError, TypeError, ValueError):
+                continue
+            if k not in fs:
+                fs[k] = now
+                changed = True
+            r["first_seen"] = fs[k]
+        if changed:
+            fs = {k: v for k, v in fs.items() if now - v < 14 * 86400}
+            try:
+                tmp = FIRST_SEEN_PATH + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(fs, f)
+                os.replace(tmp, FIRST_SEEN_PATH)
+            except OSError:
+                pass
+    return res
 
 
 def run_selftest(s):
@@ -1438,7 +1476,7 @@ class Handler(BaseHTTPRequestHandler):
                     since = float(q["since"][0])
                 except ValueError:
                     pass
-            return self._send(200, read_results(s, since, scr.out_fn(s)))
+            return self._send(200, stamp_first_seen(read_results(s, since, scr.out_fn(s)), mk or "crypto"))
         if u.path == "/api/log":
             n = min(2000, max(10, int((q.get("n") or ["300"])[0] or 300)))
             return self._send(200, {"lines": tail(scr.log_path, n), "path": scr.log_path})
