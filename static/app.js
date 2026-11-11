@@ -496,7 +496,7 @@ function renderCharts() {
       if (!en.isIntersecting) return;
       const i = +en.target.id.slice(1);
       S.observer.unobserve(en.target);
-      const r = S.rows[i];
+      const r = S.rows.find(x => x.idx === i);   // саме за idx: список відсортовано (секції), позиція ≠ idx
       if (!r || S.charts.has(i)) return;
       if (liveOn() && typeof liveMount === "function") {
         // лайв: 4h + 1h + 15m (свічки з Binance через додаток, далі — наживо)

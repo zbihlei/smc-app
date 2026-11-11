@@ -105,6 +105,14 @@ try:
               pg.locator("#tiles .tile").count() == sum(scores) == int(pg.inner_text("#cHot")) and pg.locator("#tiles .tile:not(.hot)").count() == 0)
         pg.click("#filterChips [data-f=all]")
         check("BTC спокійний → банера про біткоїн немає", pg.locator("#btcAlert").is_hidden())
+        pg.evaluate("() => { S.rows.reverse(); renderAll(); }")      # порядок у списку ≠ номер сигналу (як після сортування секціями)
+        pg.wait_for_timeout(2000)
+        mm = pg.evaluate("""() => [...LV.mounts.entries()].map(([i, m]) => [i, m.symbol, m.r.dir,
+            (document.querySelector('#c' + i + ' .hd') || {}).textContent || ''])""")
+        check("графіки в картці — саме тієї монети й напряму, що в заголовку (навіть коли список пересортовано)",
+              len(mm) >= 1 and all(m[1] in m[3] and m[2] in m[3] for m in mm), [m[:3] + [m[3][:40]] for m in mm])
+        pg.evaluate("() => { S.rows.reverse(); renderAll(); }")
+        pg.wait_for_timeout(800)
         pg.click("#tiles .tile[data-i='3'] .t-st")
         pg.wait_for_timeout(900)
         check("клік по блоку прокручує до його графіка", pg.locator("#c3").is_visible()
