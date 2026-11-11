@@ -223,9 +223,17 @@ async function pollResults(force) {
     S.mtime = r.mtime;
     const data = r.data || {};
     S.market = data.market || "futures";
-    S.rows = (data.candidates || []).map((x, i) => Object.assign({}, x, { idx: i, rank: rankOf(x), hot: Number(x.score) >= HOT }));
-    // найновіші сигнали — першими (угорі списку графіків, ліворуч у блоках); серед однакових за часом — сильні (★) першими
-    S.rows.sort((a, b) => (Math.round((b.first_seen || 0) / 60) - Math.round((a.first_seen || 0) / 60)) || (b.hot - a.hot) || (a.idx - b.idx));
+    const nowS = Date.now() / 1000;
+    S.rows = (data.candidates || []).map((x, i) => {
+      const rank = rankOf(x), bf = (x.flags || []).find(f => f.startsWith("BTC різко")) || "";
+      return Object.assign({}, x, {
+        idx: i, rank, hot: Number(x.score) >= HOT,
+        grp: rank === 0 ? 0 : (x.first_seen && nowS - x.first_seen < SCR_NEW_S ? 1 : 2),   // 0 — в зоні, 1 — нові, 2 — чекають
+        btcFlag: bf, btc: bf ? (bf.includes("ПРОТИ") ? "against" : "with") : "",
+      });
+    });
+    // порядок = «коли діяти»: в зоні → нові → чекають; усередині — новіші першими. Бали (★) — позначка, не місце.
+    S.rows.sort((a, b) => (a.grp - b.grp) || ((b.first_seen || 0) - (a.first_seen || 0)) || (a.idx - b.idx));
     renderAll();
   } catch (e) { /* статус покаже проблему зі зв'язком */ }
 }
@@ -233,7 +241,7 @@ async function pollResults(force) {
 function visibleRows() {
   const q = S.q.trim().toUpperCase();
   return S.rows.filter(r =>
-    (S.filter === "all" || (S.filter === "zone" ? r.rank === 0 : r.rank === 1)) &&
+    (S.filter === "all" || (S.filter === "hot" ? r.hot : S.filter === "zone" ? r.rank === 0 : r.rank === 1)) &&
     (S.dir === "all" || r.dir === S.dir) &&
     (!q || r.symbol.includes(q)));
 }
@@ -243,6 +251,8 @@ function renderAll() {
   $("#cAll").textContent = rows.length;
   $("#cZone").textContent = rows.filter(r => r.rank === 0).length;
   $("#cApproach").textContent = rows.filter(r => r.rank === 1).length;
+  $("#cHot").textContent = rows.filter(r => r.hot).length;
+  renderBtc(rows);
   const inZone = rows.filter(r => r.rank === 0);
   const za = $("#zoneAlert");
   if (inZone.length) {
@@ -325,20 +335,38 @@ function seenText(ts) {
   const today = new Date().toDateString() === d.toDateString();
   return (today ? "сьогодні" : `${p(d.getDate())}.${p(d.getMonth() + 1)}`) + ` ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
-function renderTiles() {
-  const rows = visibleRows();
-  $("#tiles").innerHTML = rows.map(r => {
-    const warn = (r.flags || []).length ? `<span class="t-warn" title="${esc((r.flags || []).join("; "))}">⚠ ${(r.flags || []).length}</span>` : "";
-    const btc = (r.flags || []).find(f => f.startsWith("BTC різко"));
-    return `<div class="tile s${r.rank}${r.hot ? " hot" : ""}" data-i="${r.idx}">
+const SCR_NEW_S = 2 * 3600;   // «новий» сигнал — у списку менше 2 годин
+const SCR_GROUPS = ["В зоні — час вирішувати", "Нові (за останні 2 год)", "Чекають підходу до зони"];
+// різкий рух BTC — справа всього ринку: один банер угорі (зникає сам, коли рух заспокоївся)
+function renderBtc(rows) {
+  const box = $("#btcAlert"), r = rows.find(x => x.btcFlag);
+  if (!r) { box.classList.add("hidden"); return; }
+  const head = r.btcFlag.split(" — ")[0];                       // «BTC різко падає: -2.4% за 1 год»
+  const down = head.includes("падає");
+  const nA = rows.filter(x => x.btc === "against").length;
+  box.innerHTML = `₿ ${esc(head)} — <b>${down ? "лонги" : "шорти"} під ризиком</b>: альти зазвичай ідуть за біткоїном.`
+    + (nA ? ` Проти руху зараз: ${nA} ${nA === 1 ? "сигнал" : "сигн."} (позначені червоним).` : "")
+    + ` Угоди ${down ? "Short" : "Long"} — у бік руху, але після різкого руху можливий відкат.`;
+  box.classList.remove("hidden");
+}
+function tileHtml(r) {
+  const warn = (r.flags || []).length ? `<span class="t-warn" title="${esc((r.flags || []).join("; "))}">⚠ ${(r.flags || []).length}</span>` : "";
+  const bt = r.btcFlag ? esc(r.btcFlag.split(" — ")[0].replace("BTC різко ", "")) : "";
+  return `<div class="tile s${r.rank}${r.hot ? " hot" : ""}${r.btc ? " btc-" + r.btc : ""}" data-i="${r.idx}">
       <div class="t-top"><a class="sym" href="${tvLink(r.symbol)}" target="_blank" rel="noopener">${esc(r.symbol.replace(/USDT$/, ""))}</a>
-        <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.hot ? '<span class="t-hot" title="сильний сетап">★</span>' : ""}</div>
+        <span class="dir-${esc(r.dir)}">${esc(r.dir)}</span>${r.hot ? '<span class="t-hot" title="сильний сетап (бали ≥ 2)">★</span>' : ""}</div>
       <div class="t-st act${r.rank}">${esc(r.rank === 0 ? "у зоні" : r.status)}${r.zone_type === "брейкер" ? ' · <span class="tag amber">брейкер</span>' : ""}</div>
       <div class="t-lv"><span>вхід</span><b>${fmt(r.entry)}</b><span>стоп</span><b>${fmt(r.stop)}</b><span>ціль</span><b>${fmt(r.target)}</b></div>
-      ${btc ? `<div class="t-btc" title="${esc(btc)}">₿ ${esc(btc.split(" — ")[0].replace("BTC різко ", ""))}${btc.includes("ПРОТИ") ? " · проти угоди" : ""}</div>` : ""}
+      ${r.btc === "against" ? `<div class="t-btc" title="${esc(r.btcFlag)}">₿ ${bt} · проти угоди</div>` : r.btc === "with" ? `<div class="t-btc with" title="${esc(r.btcFlag)}">₿ ${bt} · у бік угоди</div>` : ""}
       ${r.first_seen ? `<div class="t-when" title="коли сигнал уперше з'явився у списку">з ${esc(seenText(r.first_seen))}</div>` : ""}
       <div class="t-ft"><b>R:R ${fix(r.rr, 1)}</b><span>бали ${esc(r.score)}</span><span>${r.rank === 0 ? "" : fix(r.dist, 1) + "%"}</span>${warn}</div>
     </div>`;
+}
+function renderTiles() {
+  const rows = visibleRows();
+  $("#tiles").innerHTML = SCR_GROUPS.map((name, g) => {
+    const part = rows.filter(r => r.grp === g);
+    return part.length ? `<div class="tsec g${g}" data-g="${g}"><div class="tsec-h">${name} <span>${part.length}</span></div><div class="tgrid">${part.map(tileHtml).join("")}</div></div>` : "";
   }).join("");
 }
 function applyView() {

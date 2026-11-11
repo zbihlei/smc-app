@@ -241,9 +241,14 @@ try:
         check("брейкер-блок на графіках — червона зона (на всіх трьох)",
               all("242, 54, 69" in pg.eval_on_selector(f"{c} [data-zone]", "e => e.dataset.zone + getComputedStyle(e).backgroundColor")
                   and pg.get_attribute(f"{c} [data-zone]", "data-zone") == "breaker" for c in ("#ch0", "#ch1h0", "#ch150")))
-        order = pg.evaluate("""() => { const rows = [{first_seen: 100, hot: true, idx: 0}, {first_seen: 5000, hot: false, idx: 1}, {first_seen: 5010, hot: true, idx: 2}];
-            rows.sort((a, b) => (Math.round((b.first_seen || 0) / 60) - Math.round((a.first_seen || 0) / 60)) || (b.hot - a.hot) || (a.idx - b.idx)); return rows.map(r => r.idx); }""")
-        check("порядок: новіші сигнали першими; в одну хвилину — сильні (★) першими", order == [2, 1, 0], order)
+        check("сигнал у списку 3 дні → секція «Чекають» (не «Нові»)", pg.eval_on_selector_all("#tiles .tsec", "els => els.map(e => e.dataset.g)") == ["2"])
+        check("банер BTC на весь ринок: «BTC різко падає … лонги під ризиком», 1 сигнал проти руху",
+              pg.locator("#btcAlert").is_visible() and "BTC різко падає: -2.4% за 1 год" in pg.inner_text("#btcAlert")
+              and "лонги під ризиком" in pg.inner_text("#btcAlert") and "Проти руху зараз: 1" in pg.inner_text("#btcAlert"), pg.inner_text("#btcAlert"))
+        check("блок проти руху BTC позначено (червона смуга, приглушено)", pg.locator("#tiles .tile.btc-against").count() == 1)
+        srt = pg.evaluate("""() => { const rows = [{grp: 2, first_seen: 9000, idx: 0}, {grp: 1, first_seen: 100, idx: 1}, {grp: 0, first_seen: 50, idx: 2}, {grp: 1, first_seen: 500, idx: 3}];
+            rows.sort((a, b) => (a.grp - b.grp) || ((b.first_seen || 0) - (a.first_seen || 0)) || (a.idx - b.idx)); return rows.map(r => r.idx); }""")
+        check("порядок: в зоні → нові → чекають; усередині — новіші першими", srt == [2, 3, 1, 0], srt)
         check("блок: попередження про різкий рух BTC (₿ … проти угоди)", "проти угоди" in pg.inner_text("#tiles .tile .t-btc"))
         pg.click("#btnRefresh")
         pg.wait_for_timeout(800)

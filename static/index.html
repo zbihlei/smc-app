@@ -35,6 +35,7 @@
     </div>
     <div class="statusline" id="statusLine">Завантаження…</div>
     <div id="msg" class="msg hidden"></div>
+    <div id="btcAlert" class="btc-alert hidden"></div>
     <div id="zoneAlert" class="zone-alert hidden"></div>
     <div id="staleNote" class="note-box hidden"></div>
 
@@ -43,6 +44,7 @@
         <button class="chip on" data-f="all">Усі <span id="cAll">0</span></button>
         <button class="chip" data-f="zone">У зоні <span id="cZone">0</span></button>
         <button class="chip" data-f="approach">Підхід <span id="cApproach">0</span></button>
+        <button class="chip" data-f="hot" title="лише сильні сетапи (бали ≥ 2)">★ <span id="cHot">0</span></button>
       </div>
       <div class="chips" id="dirChips">
         <button class="chip on" data-d="all">Long + Short</button>

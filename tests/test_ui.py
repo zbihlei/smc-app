@@ -96,8 +96,15 @@ try:
         n_t = pg.locator("#tiles .tile").count()
         scores = pg.eval_on_selector_all("#tiles .tile", "els => els.map(e => e.classList.contains('hot'))")
         check("за замовчуванням — блоки (6 шт.), таблиця прихована", n_t == 6 and pg.locator("#tblWrap").is_hidden())
-        check("бали ≥ 2: рамка й ★, і такі блоки — угорі", any(scores) and scores == sorted(scores, reverse=True)
-              and pg.locator("#tiles .tile.hot .t-hot").count() == sum(scores), scores)
+        check("бали ≥ 2: рамка й ★ (позначка, а не місце у списку)", any(scores) and pg.locator("#tiles .tile.hot .t-hot").count() == sum(scores), scores)
+        secs = pg.eval_on_selector_all("#tiles .tsec", "els => els.map(e => [e.dataset.g, e.querySelectorAll('.tile').length, e.querySelectorAll('.tile.s0').length])")
+        check("секції: «В зоні» першою (лише блоки в зоні), далі «Нові»; порожніх секцій немає",
+              [x[0] for x in secs] == ["0", "1"] and secs[0][1] == secs[0][2] >= 1 and secs[1][2] == 0 and secs[0][1] + secs[1][1] == 6, secs)
+        pg.click("#filterChips [data-f=hot]")
+        check("фільтр ★: лише сильні сетапи, лічильник збігається",
+              pg.locator("#tiles .tile").count() == sum(scores) == int(pg.inner_text("#cHot")) and pg.locator("#tiles .tile:not(.hot)").count() == 0)
+        pg.click("#filterChips [data-f=all]")
+        check("BTC спокійний → банера про біткоїн немає", pg.locator("#btcAlert").is_hidden())
         pg.click("#tiles .tile[data-i='3'] .t-st")
         pg.wait_for_timeout(900)
         check("клік по блоку прокручує до його графіка", pg.locator("#c3").is_visible()
