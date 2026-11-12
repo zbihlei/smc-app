@@ -32,7 +32,7 @@ APP_FILE = "latest_app.json"
 # поля, які потрібні додатку (таблиця + графік)
 KEEP = ["symbol", "dir", "status", "rank", "score", "price", "zone_low", "zone_high", "entry", "stop", "target",
         "target_type", "rr", "dist", "fib", "fib_ok", "fvg", "sweep", "volume", "vol_conf", "atr_pct", "knife",
-        "flags", "bos_time", "bos_bars_ago", "struct", "against", "chart", "zone_t", "tf_ms", "zone_type", "entry_mid", "entry_tol", "rr_mid", "struct_range", "eq_low", "eq_high"]
+        "flags", "bos_time", "bos_bars_ago", "struct", "against", "chart", "zone_t", "tf_ms", "zone_type", "entry_mid", "entry_tol", "rr_mid", "struct_range", "eq_low", "eq_high", "stop_sweep"]
 
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # tg.py поруч
@@ -263,6 +263,127 @@ def report_dropped(mod, out_dir, stamp, rows, rejects):
     return out
 
 
+# ---------------------------------------------------------------- стоп уже пробивало / зняття ліквідності (v1.9)
+SWEEP_FILE = "sweeps_log.csv"
+SWEEP_SEEN = "sweeps_seen.json"
+SWEEP_TF, SWEEP_BARS = "15m", 96          # дивимось останні 24 год по 15 хв
+SWEEP_VOL_BASE = 20                       # обсяг свічки пробою — відносно середнього за стільки свічок перед нею
+SWEEP_VOL_X, SWEEP_WICK = 2.0, 0.33       # «підвищений обсяг» від ×2; «довгий гніт» від третини свічки (початкові пороги)
+SWEEP_MAX_ROWS = 40
+SWEEP_PREFIX = ("стоп уже пробивало", "схоже на зняття ліквідності", "після пробою стопа")
+SWEEP_COLS = ["time", "symbol", "dir", "zone_low", "zone_high", "entry", "stop", "target", "ext_time", "ext_price",
+              "depth_pct", "vol_ratio", "wick_pct", "pattern", "reclaim", "price", "score"]
+
+
+def stop_sweep(c, r, now_ms=None):
+    """Чи пробивала ціна стоп сигналу r за свічками c (15m, найновіша остання) і як це виглядало.
+    Сигнал ще в списку, отже 4h за зоною не закрилась: пробій стопа «всередині свічки» — це або зняття
+    ліквідності, або початок зламу. Повертає None (стоп не чіпали) або словник з описом. Лише інформація."""
+    sgn = 1 if r["dir"] == "Long" else -1
+    stop, zl, zh = float(r["stop"]), float(r["zone_low"]), float(r["zone_high"])
+    ext = lambda x: x["l"] if sgn == 1 else x["h"]
+    hit = [i for i, x in enumerate(c) if (ext(x) - stop) * sgn < 0]
+    if not hit or stop <= 0:
+        return None
+    i = min(range(hit[0], len(c)), key=lambda k: ext(c[k]) * sgn)      # свічка з крайньою точкою після пробою
+    x = c[i]
+    base = [y["v"] for y in c[max(0, i - SWEEP_VOL_BASE):i] if y.get("v")]
+    vol = (x["v"] / (sum(base) / len(base))) if base and x.get("v") and sum(base) > 0 else None
+    rng = x["h"] - x["l"]
+    wick = ((min(x["o"], x["c"]) - x["l"]) if sgn == 1 else (x["h"] - max(x["o"], x["c"]))) / rng if rng > 0 else 0.0
+    back = (x["c"] - x["o"]) * sgn > 0                                   # свічка закрилась у бік угоди
+    prev = c[i - 1] if i else None
+    engulf = bool(prev and back and (prev["c"] - prev["o"]) * sgn < 0 and (x["c"] - prev["o"]) * sgn > 0)
+    pat = []
+    if wick >= 0.5:
+        pat.append(f"пін-бар (гніт {wick * 100:.0f}% свічки)")
+    elif wick >= SWEEP_WICK:
+        pat.append(f"довгий гніт ({wick * 100:.0f}% свічки)")
+    if engulf:
+        pat.append("поглинання попередньої свічки")
+    closed = [y for y in c[i:] if y.get("closed", True)]
+    last = closed[-1]["c"] if closed else x["c"]
+    edge_in, edge_out = (zl, zh) if sgn == 1 else (zh, zl)
+    if (last - edge_out) * sgn > 0:
+        reclaim = "над зоною" if sgn == 1 else "під зоною"
+    elif (last - edge_in) * sgn >= 0:
+        reclaim = "у зоні"
+    elif (last - stop) * sgn > 0:
+        reclaim = "за стопом, але ще поза зоною"
+    else:
+        reclaim = ""
+    now_ms = now_ms or int(dt.datetime.now().timestamp() * 1000)
+    return {"t": x["t"], "price": ext(x), "depth": abs(ext(x) - stop) / stop * 100, "vol": vol, "wick": wick,
+            "pattern": pat, "reclaim": reclaim, "last": last, "mins": max(0, int((now_ms - x["t"]) / 60000)),
+            "sweep_like": bool(reclaim and (pat or (vol or 0) >= SWEEP_VOL_X))}
+
+
+def sweep_flags(r, s):
+    side, far = ("мін.", "нижче") if r["dir"] == "Long" else ("макс.", "вище")
+    when = dt.datetime.fromtimestamp(s["t"] / 1000).strftime("%H:%M")
+    ago = f"{s['mins']} хв тому" if s["mins"] < 120 else f"{s['mins'] / 60:.0f} год тому"
+    out = [f"стоп уже пробивало: {side} {s['price']:g} ({s['depth']:.1f}% {far} стопа) о {when}, {ago} — "
+           f"лімітка за цим сигналом уже закрилась би по стопу"]
+    info = []
+    if s["vol"] is not None:
+        info.append(f"обсяг на пробої ×{s['vol']:.1f} до середнього" + (" (підвищений)" if s["vol"] >= SWEEP_VOL_X else " (звичайний)"))
+    info.append("свічка: " + (", ".join(s["pattern"]) if s["pattern"] else "без розворотного патерну"))
+    info.append(("15m закрилась " + s["reclaim"]) if s["reclaim"] else "ціна ще за стопом — повернення немає")
+    head = "схоже на зняття ліквідності" if s["sweep_like"] else "після пробою стопа"
+    out.append(f"{head}: " + "; ".join(info))
+    return out
+
+
+def annotate_sweeps(mod, out_dir, rows):
+    """Після скану: для кожної пари зі списку — чи пробивало стоп за останню добу. Попередження у flags (у алерті,
+    на плитці, в логу), поле stop_sweep для додатка і рядок у sweeps_log.csv (раз на кожен новий екстремум)."""
+    if not rows or not hasattr(mod, "fetch_klines"):
+        return 0
+    seen_path = os.path.join(out_dir, SWEEP_SEEN)
+    try:
+        with open(seen_path, encoding="utf-8") as f:
+            seen = json.load(f)
+    except Exception:
+        seen = {}
+    new = []
+    for r in rows[:SWEEP_MAX_ROWS]:
+        r["flags"] = [f for f in r.get("flags", []) if not f.startswith(SWEEP_PREFIX)]
+        r.pop("stop_sweep", None)
+        try:
+            s = stop_sweep(mod.fetch_klines(r["symbol"], SWEEP_TF, SWEEP_BARS), r)
+        except Exception:
+            continue                                                    # немає 15m — просто без цього попередження
+        if not s:
+            continue
+        r["flags"] = sweep_flags(r, s) + r["flags"]
+        r["stop_sweep"] = {k: s[k] for k in ("t", "price", "depth", "vol", "wick", "pattern", "reclaim", "sweep_like")}
+        if seen.get(_key(r)) != s["t"]:
+            seen[_key(r)] = s["t"]
+            new.append((r, s))
+    if new:
+        try:
+            import csv
+            os.makedirs(out_dir, exist_ok=True)
+            path = os.path.join(out_dir, SWEEP_FILE)
+            fresh = not os.path.exists(path)
+            with open(path, "a", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                if fresh:
+                    w.writerow(SWEEP_COLS)
+                now = dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+                for r, s in new:
+                    w.writerow([now, r["symbol"], r["dir"], r["zone_low"], r["zone_high"], r["entry"], r["stop"], r["target"],
+                                dt.datetime.fromtimestamp(s["t"] / 1000).strftime("%Y-%m-%d %H:%M"), s["price"],
+                                round(s["depth"], 2), "" if s["vol"] is None else round(s["vol"], 2), round(s["wick"] * 100),
+                                ", ".join(s["pattern"]), s["reclaim"], r.get("price", ""), r.get("score", "")])
+            keep = {_key(r) for r in rows}
+            with open(seen_path, "w", encoding="utf-8") as f:
+                json.dump({k: v for k, v in seen.items() if k in keep}, f)
+        except Exception as e:
+            print(f"  [додаток] не вдалося записати {SWEEP_FILE}: {e}")
+    return len(new)
+
+
 # ---------------------------------------------------------------- сповіщення Mac: по черзі, без «хору»
 GROUP_FROM = 3     # стільки й більше алертів за один скан — одне зведене сповіщення на Mac
 GAP_S = 1.5        # пауза між сповіщеннями Mac
@@ -421,6 +542,13 @@ def install_hooks(mod):
             STATE["scan_failed"] = True
             raise
         STATE["scan_failed"] = False
+        try:
+            rows = res[0] if isinstance(res, tuple) else res
+            out_dir = getattr(args[0], "out", None) if args else None
+            if out_dir and isinstance(rows, list):
+                annotate_sweeps(mod, out_dir, rows)
+        except Exception as e:  # попередження — не критичне, скринер працює далі
+            print(f"  [додаток] не вдалося перевірити пробої стопа: {e}")
         return res
 
     mod.save_json = save_json
