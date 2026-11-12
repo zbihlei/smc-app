@@ -9,6 +9,8 @@ SMC-скринер v1: шукає на Binance (USDT-пари, 4h) кандид�
   5) R:R не менше заданого (за замовчуванням 3);
   7) v2.7: допуск входу --entry-tol N (% висоти зони): ціна не завжди доходить рівно до середини блока;
   9) v2.9: попередження про різкий рух BTC (--btc-warn 1.5: % за ~1 год, ×2 за ~4 год) у флагах сигналів і алертах.
+  10) v2.10 (обидва вимкнені за замовчуванням): --range-struct X — «діапазон біля мінімумів/максимумів» рахується як тренд
+      (вниз/вгору «діапазон»), а не «змішана» структура; --eq-levels X — попередження про рівні мінімуми/максимуми поблизу.
   8) v2.8: ордерблок — ТІЛО свічки (--ob-zone body, за замовчуванням); стоп — за гнотом свічки ОБ; уся свічка: --ob-zone candle.
   6) v2.6: брейкер-блоки — пробитий ордерблок протилежного напрямку, якщо пробій дав BOS (вимкнути: --no-breakers).
 
@@ -405,6 +407,63 @@ def volatility_info(c, cfg):
     return {"atr_pct": atr_pct, "knife": knife, "knife_ratio": ratio}
 
 
+def range_struct(th, tl, tol_pct):
+    """v2.10, --range-struct X. Структура, коли класичного HH+HL / LH+LL немає («змішана»), але це діапазон:
+      -1 «вниз (діапазон)»: останній свінг-максимум не вищий за попередній (нижчий або рівний у межах X%),
+                            а два останні свінг-мінімуми рівні в межах X% (ціна стоїть на мінімумах);
+      +1 «вгору (діапазон)»: дзеркально — мінімум не нижчий, максимуми рівні в межах X%.
+    Якщо підходять обидва описи (і максимуми, і мінімуми рівні) — вирішує той бік, що справді зсунувся; якщо
+    жоден або обидва (трикутник, що звужується) — 0, структура лишається «змішаною»."""
+    if not tol_pct or len(th) < 2 or len(tl) < 2:
+        return 0
+    h1, h2, l1, l2 = th[-1][1], th[-2][1], tl[-1][1], tl[-2][1]
+    if h2 <= 0 or l2 <= 0:
+        return 0
+    tol = tol_pct / 100.0
+    hi_eq, lo_eq = abs(h1 - h2) / h2 <= tol, abs(l1 - l2) / l2 <= tol
+    down = (h1 < h2 or hi_eq) and lo_eq
+    up = (l1 > l2 or lo_eq) and hi_eq
+    if down and up:
+        lower_high, higher_low = h1 < h2, l1 > l2
+        if lower_high and not higher_low:
+            return -1
+        if higher_low and not lower_high:
+            return 1
+        return 0
+    return -1 if down else (1 if up else 0)
+
+
+def equal_levels(c, swings, side, px, tol_pct, max_dist_pct, look=90):
+    """v2.10, --eq-levels X. Найближчий до ціни кластер «рівних» свінг-мінімумів (side="low", під ціною) або
+    максимумів (side="high", над ціною): 2+ торкань у межах X% одне від одного за останні look свічок, рівень ще
+    не пробито закриттям після останнього торкання. Повертає {"level", "n", "dist"} (dist — % від ціни) або None."""
+    if not tol_pct or px <= 0:
+        return None
+    first = len(c) - look
+    pts = sorted((p, i) for i, p in swings if i >= first)
+    tol = tol_pct / 100.0
+    best = None
+    k = 0
+    while k < len(pts):
+        j = k
+        while j + 1 < len(pts) and (pts[j + 1][0] - pts[k][0]) / pts[k][0] <= tol:
+            j += 1
+        if j > k:
+            grp = pts[k:j + 1]
+            level = grp[0][0] if side == "low" else grp[-1][0]   # крайня точка кластера: за нею стоять стопи
+            last_i = max(i for _, i in grp)
+            if side == "low":
+                alive = px > level and all(x["c"] >= level for x in c[last_i + 1:])
+                dist = (px - level) / px * 100
+            else:
+                alive = px < level and all(x["c"] <= level for x in c[last_i + 1:])
+                dist = (level - px) / px * 100
+            if alive and dist <= max_dist_pct and (best is None or dist < best["dist"]):
+                best = {"level": level, "n": len(grp), "dist": dist}
+        k = j + 1
+    return best
+
+
 def analyze_symbol(symbol, candles, px, cfg):
     """Повертає список кандидатів (найкращий першим) для одного символа. c = лише закриті свічки."""
     c = candles
@@ -435,6 +494,10 @@ def analyze_symbol(symbol, candles, px, cfg):
             struct = 1
         elif th[-1][1] < th[-2][1] and tl[-1][1] < tl[-2][1]:
             struct = -1
+    struct_range = False
+    if struct == 0 and cfg.get("range_struct"):
+        struct = range_struct(th, tl, cfg["range_struct"])
+        struct_range = struct != 0
     if tmode != "bos":
         if struct != last_dir:
             against = True  # у режимі strict такі кандидати відсіюються нижче, але потрапляють у лог
@@ -541,6 +604,21 @@ def analyze_symbol(symbol, candles, px, cfg):
                          f"{dt.datetime.fromtimestamp(c[ev['idx']]['t'] / 1000).strftime('%d.%m %H:%M')}")
         if against:
             flags.append("ПРОТИ структури 4h (немає HH+HL / LH+LL у напрямку)")
+        if struct_range and not against:
+            flags.append("структура 4h — діапазон біля " + ("мінімумів (максимуми не вищі, мінімуми рівні)" if struct == -1
+                                                             else "максимумів (мінімуми не нижчі, максимуми рівні)") + ", не класичний тренд")
+        eq_lo = eq_hi = None
+        if cfg.get("eq_levels"):
+            eq_lo = equal_levels(c, lows, "low", px, cfg["eq_levels"], cfg.get("eq_dist", 5.0))
+            eq_hi = equal_levels(c, highs, "high", px, cfg["eq_levels"], cfg.get("eq_dist", 5.0))
+            if eq_lo:
+                txt = f"рівні мінімуми ×{eq_lo['n']} на {fmt(eq_lo['level'])} (−{eq_lo['dist']:.1f}% від ціни)"
+                flags.append(("ліквідність нижче: " + txt + " — ціль і ризик свіпу з розворотом") if d == -1 else
+                             ("ризик: " + txt + " — під ціною ліквідність, можливий свіп униз"))
+            if eq_hi:
+                txt = f"рівні максимуми ×{eq_hi['n']} на {fmt(eq_hi['level'])} (+{eq_hi['dist']:.1f}% від ціни)"
+                flags.append(("ліквідність вище: " + txt + " — ціль і ризик свіпу з розворотом") if d == 1 else
+                             ("ризик: " + txt + " — над ціною ліквідність, можливий свіп угору"))
         if mid_passed:
             flags.append("середина зони вже пройдена, шукай 1h-уточнення" if not tol else
                          f"рівень лімітки (середина + допуск {tol:g}%) вже пройдено, шукай 1h-уточнення")
@@ -582,6 +660,7 @@ def analyze_symbol(symbol, candles, px, cfg):
             "bos_bars_ago": last_i - ev["idx"],
             "bos_time": dt.datetime.fromtimestamp(c[ev["idx"]]["t"] / 1000).strftime("%d.%m %H:%M"),
             "struct": struct, "against": against, "zone_type": "брейкер" if zb is not None else "OB",
+            "struct_range": struct_range, "eq_low": eq_lo, "eq_high": eq_hi,
         })
         if against and tmode == "strict":
             cfg.setdefault("rejects", []).append(item)  # лише для логу: у список не потрапляє
@@ -733,7 +812,7 @@ def save_csv(rows, path):
 def save_json(rows, path, stamp):
     """Компактний JSON усіх кандидатів (без важких даних графіка) для журналу чи подальшої автоматизації."""
     keep = ["symbol", "dir", "status", "score", "price", "zone_low", "zone_high", "entry", "stop", "target",
-            "target_type", "rr", "dist", "fib", "fib_ok", "fvg", "sweep", "volume", "vol_conf", "atr_pct", "knife", "flags", "bos_time", "struct", "against", "zone_type", "entry_mid", "entry_tol", "rr_mid"]
+            "target_type", "rr", "dist", "fib", "fib_ok", "fvg", "sweep", "volume", "vol_conf", "atr_pct", "knife", "flags", "bos_time", "struct", "against", "zone_type", "entry_mid", "entry_tol", "rr_mid", "struct_range", "eq_low", "eq_high"]
     data = {"generated": stamp, "market": "futures" if MKT["futures"] else "spot",
             "count": len(rows), "candidates": [{k: r.get(k) for k in keep} for r in rows]}
     with open(path, "w", encoding="utf-8") as f:
@@ -741,6 +820,22 @@ def save_json(rows, path, stamp):
 
 
 STRUCT_TXT = {1: "вгору (HH+HL)", -1: "вниз (LH+LL)", 0: "змішана"}
+STRUCT_RANGE_TXT = {1: "вгору (діапазон)", -1: "вниз (діапазон)"}   # v2.10, лише з --range-struct
+LOG_EXTRA = ["eq_low", "eq_low_dist", "eq_high", "eq_high_dist"]      # v2.10, лише з --eq-levels; завжди в кінці рядка
+LOG_OPTS = {"eq": False}
+
+
+def struct_text(r):
+    s = r.get("struct", 0)
+    return STRUCT_RANGE_TXT.get(s, "") if r.get("struct_range") else STRUCT_TXT.get(s, "")
+
+
+def log_extra(r):
+    out = []
+    for k in ("eq_low", "eq_high"):
+        e = r.get(k)
+        out += [e["level"], round(e["dist"], 2)] if e else ["", ""]
+    return out
 LOG_KEYS = ["time", "kind", "symbol", "dir", "status", "score", "price", "zone_low", "zone_high", "entry", "stop",
             "target", "rr", "dist", "struct4h", "against", "bos_time", "knife", "warnings"]
 
@@ -755,15 +850,15 @@ def append_log(out_dir, stamp, rows, rejects, live=None):
     with open(path, "a", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
         if new:
-            w.writerow(LOG_KEYS)
+            w.writerow(LOG_KEYS + (LOG_EXTRA if LOG_OPTS["eq"] else []))
         for kind, lst in (("у списку", rows), ("відсіяно: проти структури 4h", rejects),
                           ("наживо: ціна в зоні", [dict(r, price=px) for r, px in (live or [])])):
             for r in lst:
                 w.writerow([f"{day} {stamp[-5:]}", kind, r["symbol"], r["dir"], r["status"], r["score"], r["price"],
                             r["zone_low"], r["zone_high"], round(r["entry"], 8), round(r["stop"], 8), r["target"],
-                            round(r["rr"], 2), round(r["dist"], 2), STRUCT_TXT.get(r.get("struct", 0), ""),
+                            round(r["rr"], 2), round(r["dist"], 2), struct_text(r),
                             "так" if r.get("against") else "ні", r["bos_time"], "так" if r.get("knife") else "ні",
-                            "; ".join(r["flags"])])
+                            "; ".join(r["flags"])] + (log_extra(r) if LOG_OPTS["eq"] else []))
 
 
 def day_report(out_dir, day=None):
@@ -1191,6 +1286,29 @@ def selftest():
     rmax = analyze_symbol("V", with_vol(cv_base, 220.0, 50.0), 94.0, dict(vcfg, max_atr=0.01))
     check("--max-atr відсіює надто волатильну пару", rmax == [])
 
+    # ---- v2.10: діапазон як структура, рівні мінімуми/максимуми
+    H = lambda *v: [(i, x) for i, x in enumerate(v)]
+    check("v2.10: без --range-struct (0) нічого не змінюється", range_struct(H(0.45, 0.441), H(0.4075, 0.408), 0) == 0)
+    check("v2.10: максимуми нижчі, мінімуми рівні в межах 1,5% → вниз (діапазон)", range_struct(H(0.45, 0.441), H(0.4075, 0.4085), 1.5) == -1)
+    check("v2.10: максимуми рівні, мінімуми рівні, жоден бік не зсунувся в один бік → змішана",
+          range_struct(H(0.450, 0.449), H(0.4075, 0.4085), 1.5) == 0)
+    check("v2.10: мінімум вищий на 3% (більше допуску) → змішана, а не діапазон", range_struct(H(0.45, 0.441), H(0.397, 0.409), 1.5) == 0)
+    check("v2.10: дзеркально — мінімуми вищі, максимуми рівні → вгору (діапазон)", range_struct(H(1.000, 0.995), H(0.90, 0.93), 1.5) == 1)
+    check("v2.10: максимум вищий понад допуск при рівних мінімумах → не «вниз»", range_struct(H(0.44, 0.46), H(0.4075, 0.408), 1.5) == 0)
+    cc = [{"o": 10, "h": 10.5, "l": 9.8, "c": 10.2} for _ in range(40)]
+    sw = [(5, 9.00), (15, 9.05), (25, 9.60)]
+    e = equal_levels(cc, sw, "low", 10.0, 1.5, 15.0)
+    check("v2.10: два рівні мінімуми (9,00 і 9,05) → кластер ×2 на 9,00, відстань 10%", bool(e) and e["n"] == 2 and e["level"] == 9.0 and abs(e["dist"] - 10) < 1e-6, e)
+    check("v2.10: кластер далі за --eq-dist → не показується", equal_levels(cc, sw, "low", 10.0, 1.5, 5.0) is None)
+    cc2 = [dict(x) for x in cc]
+    cc2[30]["c"] = 8.9
+    check("v2.10: рівень уже пробито закриттям → ліквідність знято, прапорця немає", equal_levels(cc2, sw, "low", 10.0, 1.5, 15.0) is None)
+    check("v2.10: один свінг — не кластер", equal_levels(cc, [(5, 9.0), (25, 9.6)], "low", 10.0, 1.5, 15.0) is None)
+    e = equal_levels(cc, [(5, 11.0), (20, 11.1)], "high", 10.0, 1.5, 15.0)
+    check("v2.10: рівні максимуми над ціною → рівень 11,1", bool(e) and e["level"] == 11.1 and e["n"] == 2, e)
+    check("v2.10: лог — «вниз (діапазон)» окремим значенням struct4h; без прапорця текст старий",
+          struct_text({"struct": -1, "struct_range": True}) == "вниз (діапазон)" and struct_text({"struct": -1}) == "вниз (LH+LL)"
+          and struct_text({"struct": 0}) == "змішана")
     print("\nПІДСУМОК: " + ("усі перевірки пройдено" if ok else "ЄСТЬ ПОМИЛКИ"))
     return 0 if ok else 1
 
@@ -1467,6 +1585,14 @@ def main():
     p.add_argument("--rr-at-limit", action="store_true", help="мін. R:R перевіряти від лімітки з допуском (за замовч. — від середини зони)")
     p.add_argument("--btc-warn", type=float, default=1.5,
                    help="попередження, якщо BTC змінився більш ніж на N%% за ~1 год (або 2N%% за ~4 год); 0 — вимкнено (v2.9)")
+    p.add_argument("--range-struct", type=float, default=0.0, metavar="X",
+                   help="v2.10: «діапазон біля мінімумів» (максимуми не вищі, мінімуми рівні в межах X%%) вважати структурою вниз, "
+                        "дзеркально — вгору; у лозі struct4h «вниз (діапазон)» / «вгору (діапазон)». 0 — вимкнено (за замовч.)")
+    p.add_argument("--eq-levels", type=float, default=0.0, metavar="X",
+                   help="v2.10: попередження про рівні мінімуми/максимуми поблизу (2+ свінги в межах X%% один від одного); "
+                        "лише інформація, на бали не впливає. 0 — вимкнено (за замовч.)")
+    p.add_argument("--eq-dist", type=float, default=5.0, metavar="N",
+                   help="v2.10: наскільки далеко від ціни шукати рівні мінімуми/максимуми для --eq-levels, %% (5)")
     p.add_argument("--ob-zone", choices=["body", "candle"], default="body",
                    help="межі ордерблока: body — тіло свічки (за замовч., v2.8), candle — уся свічка з гнотами")
     p.add_argument("--no-breakers", action="store_true", help="не шукати брейкер-блоки (пробиті ордерблоки, що стали зоною в інший бік)")
@@ -1517,7 +1643,9 @@ def main():
     cfg = {"knife": not a.no_knife, "knife_mult": a.knife_mult, "knife_look": a.knife_look, "max_atr": a.max_atr, "min_score": a.min_score, "volume": not a.no_volume, "vol_imp": a.vol_imp, "vol_pb": a.vol_pb, "charts": a.charts, "only_sweep": a.only_sweep, "trend": a.trend, "trend_swing": a.trend_swing, "wick": a.stop_wick, "wick_pct": a.wick_pct, "deep": a.deep, "min_stop_atr": a.min_stop_atr, "need_fvg": a.need_fvg, "swing": a.swing, "events": a.events, "max_age": a.max_age, "max_leg": a.max_leg, "max_zone": a.max_zone,
            "approach": a.approach, "buffer": a.buffer, "min_rr": a.min_rr, "allow_retests": a.allow_retests,
            "fib_lo": a.fib_lo, "fib_hi": a.fib_hi, "breakers": not a.no_breakers, "ob_zone": a.ob_zone,
-           "entry_tol": max(0.0, min(50.0, a.entry_tol)), "rr_at_limit": a.rr_at_limit}
+           "entry_tol": max(0.0, min(50.0, a.entry_tol)), "rr_at_limit": a.rr_at_limit,
+           "range_struct": max(0.0, a.range_struct), "eq_levels": max(0.0, a.eq_levels), "eq_dist": max(0.0, a.eq_dist)}
+    LOG_OPTS["eq"] = cfg["eq_levels"] > 0
     if a.debug:
         cfg["stats"] = {}
 
