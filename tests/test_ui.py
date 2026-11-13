@@ -101,7 +101,7 @@ try:
         check("бали справді пофарбовані (зелений rgb(8, 153, 129) / червоний rgb(211, 47, 47)), а не лише мають клас", all(
             (c == "rgb(8, 153, 129)") if "pos" in k else (c == "rgb(211, 47, 47)") if "neg" in k else True for k, c in col)
             and any("pos" in k or "neg" in k for k, _ in col), col)
-        check("версія додатка в підвалі сторінки", pg.locator("#appFoot").inner_text().startswith("SMC App v1."), pg.locator("#appFoot").inner_text())
+        check("версія додатка в підвалі сторінки", pg.locator("#appFoot").inner_text().startswith("Rulebound v"), pg.locator("#appFoot").inner_text())
         check("бали кольором: плюс — зелений зі знаком «+», мінус — червоний, нуль — без кольору", len(sc) == n_t and all(
             (p and t.startswith("+") and not n) if float(t.replace("−", "-")) > 0 else (n and t.startswith("−") and not p) if float(t.replace("−", "-")) < 0
             else (not p and not n) for t, p, n in sc), sc)

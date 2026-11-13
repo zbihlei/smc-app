@@ -1,4 +1,4 @@
-/* SMC App — вкладка «Спот»: «шансові» монети на споті (денні свічки). Використовує $, $$, esc, api (app.js). */
+/* Rulebound — вкладка «Спот»: «шансові» монети на споті (денні свічки). Використовує $, $$, esc, api (app.js). */
 "use strict";
 
 const SPS = { data: null, timer: null, kind: "all", err: "" };

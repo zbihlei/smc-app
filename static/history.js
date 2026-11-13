@@ -1,4 +1,4 @@
-/* SMC App — вкладка «Історія»: хронологія змін (що, чому, з якої угоди, результат).
+/* Rulebound — вкладка «Історія»: хронологія змін (що, чому, з якої угоди, результат).
    Використовує $, $$, esc, api, store (app.js), mdInline (strategy.js), openTab (app.js), loadJournal/openDrawer (journal.js). */
 "use strict";
 

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Форекс-дані для SMC App з MetaTrader 5 (v1.6).
+Форекс-дані для Rulebound з MetaTrader 5 (v1.6).
 
 Робот SMC_Bridge.mq5 (папка mt5/) працює в терміналі MT5 Michel (RoboForex) і пише у СПІЛЬНУ папку файлів MT5
 (Common/Files/SMC):

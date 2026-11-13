@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Етап 4: вкладка «Стратегія», збирач SMC App.app, лаунчер (зі стабами open/osascript) і «Закрити додаток».
+"""Етап 4: вкладка «Стратегія», збирач Rulebound.app, лаунчер (зі стабами open/osascript) і «Закрити додаток».
 Запуск: python3 tests/test_step4.py [папка_скріншотів]   (macOS не потрібен)"""
 import json
 import os
@@ -132,7 +132,7 @@ try:
         # ---------- «Закрити додаток»
         pg.click(".tab[data-tab=settings]")
         pg.click("#btnShutdown")
-        expect(pg.locator(".closed")).to_contain_text("SMC App закрито")
+        expect(pg.locator(".closed")).to_contain_text("Rulebound закрито")
         check("«Закрити додаток» зупиняє сервер", wait(lambda: not up(PORT), 8))
         check("помилок у консолі браузера немає", not [e for e in errors if "Failed to fetch" not in e], errors[:3])
         b.close()
@@ -140,19 +140,24 @@ finally:
     app.terminate()
 
 # ================================================================ 3. збирач .app
+shell = shutil.which("zsh") or shutil.which("bash")
 dest = tempfile.mkdtemp(prefix="smc4_apps_")
-out = subprocess.run([sys.executable, os.path.join(APP, "make_app.py"), "--dest", dest], capture_output=True, text=True)
-bundle = os.path.join(dest, "SMC App.app")
-exe = os.path.join(bundle, "Contents", "MacOS", "SMC App")
-check("make_app.py створює SMC App.app", out.returncode == 0 and os.path.isdir(bundle), out.stdout + out.stderr)
+out = subprocess.run([sys.executable, os.path.join(APP, "make_app.py"), "--dest", dest], capture_output=True, text=True,
+                     env=dict(os.environ, SMC_APP_SHELL=shell))
+bundle = os.path.join(dest, "Rulebound.app")
+exe = os.path.join(bundle, "Contents", "MacOS", "Rulebound")
+launcher = os.path.join(bundle, "Contents", "Resources", "launcher.sh")
+check("make_app.py створює Rulebound.app", out.returncode == 0 and os.path.isdir(bundle), out.stdout + out.stderr)
+check("виконуваний файл — скомпільована програма (не скрипт)", open(exe, "rb").read(4) in (b"\x7fELF", b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe")
+      and "скомпільовано" in out.stdout, out.stdout)
 with open(os.path.join(bundle, "Contents", "Info.plist"), "rb") as f:
     info = plistlib.load(f)
-check("Info.plist коректний (виконуваний файл, id, без зайвої іконки в Dock)", info["CFBundleExecutable"] == "SMC App"
+check("Info.plist коректний (виконуваний файл, id, без іконки в Dock)", info["CFBundleExecutable"] == "Rulebound"
       and info["CFBundlePackageType"] == "APPL" and info["LSUIElement"] is True)
-check("лаунчер виконуваний і знає папку додатка та Python", os.access(exe, os.X_OK)
-      and f'APP_DIR="{APP}"' in open(exe).read() and sys.executable in open(exe).read())
+check("launcher.sh у Resources знає папку додатка й Python", os.access(launcher, os.X_OK)
+      and f'APP_DIR="{APP}"' in open(launcher).read() and sys.executable in open(launcher).read())
 
-# ================================================================ 4. лаунчер на стабах (open, osascript)
+# ================================================================ 4. програма + лаунчер на стабах (open, osascript)
 stub = tempfile.mkdtemp(prefix="smc4_stub_")
 calls = os.path.join(stub, "calls.txt")
 for name, body in (("open", f'echo "open $*" >> {calls}; exit 0'), ("osascript", f'echo "osascript $*" >> {calls}; exit 0')):
@@ -160,28 +165,36 @@ for name, body in (("open", f'echo "open $*" >> {calls}; exit 0'), ("osascript",
     with open(p, "w") as f:
         f.write("#!/bin/bash\n" + body + "\n")
     os.chmod(p, 0o755)
-test_launcher = os.path.join(stub, "launcher.sh")
-src = open(exe).read().replace("/usr/bin/open", os.path.join(stub, "open")).replace("/usr/bin/osascript", os.path.join(stub, "osascript"))
+src = open(launcher).read().replace("/usr/bin/open", os.path.join(stub, "open")).replace("/usr/bin/osascript", os.path.join(stub, "osascript"))
+with open(launcher, "w") as f:
+    f.write(src)
 data4 = tempfile.mkdtemp(prefix="smc4_data2_")
 with open(os.path.join(data4, "settings.json"), "w") as f:
     json.dump({"screener_path": "x", "results_dir": tempfile.mkdtemp()}, f)
-with open(test_launcher, "w") as f:
-    f.write(src)
-shell = shutil.which("zsh") or "bash"
 env = dict(os.environ, HOME=tempfile.mkdtemp(), SMC_APP_DATA=data4)
-r = subprocess.run([shell, test_launcher], env=env, capture_output=True, text=True, timeout=60)
-log = open(calls).read() if os.path.exists(calls) else ""
-check(f"лаунчер ({os.path.basename(shell)}): піднімає сервер на 8765", up(8765), r.stdout + r.stderr)
-check("лаунчер відкриває окреме вікно Chrome (--app=http://127.0.0.1:8765)", "--app=http://127.0.0.1:8765" in log and "Google Chrome" in log, log)
+first = subprocess.Popen([exe], env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+check("програма запускає сервер на 8765", wait(lambda: up(8765), 20))
+check("відкриває окреме вікно Chrome (--app=http://127.0.0.1:8765)", wait(lambda: os.path.exists(calls) and "--app=http://127.0.0.1:8765" in open(calls).read(), 10),
+      open(calls).read() if os.path.exists(calls) else "")
+time.sleep(1)
+check("програма лишається «батьком» сервера, поки він працює", first.poll() is None)
 open(calls, "w").close()
-r = subprocess.run([shell, test_launcher], env=env, capture_output=True, text=True, timeout=60)
+second = subprocess.run([exe], env=env, capture_output=True, text=True, timeout=30)
 procs = subprocess.run(["pgrep", "-f", "app.py --port 8765"], capture_output=True, text=True).stdout.split()
-check("повторний запуск не стартує другий сервер, лише відкриває вікно", len(procs) == 1 and "--app=" in open(calls).read(), procs)
+check("повторний запуск не стартує другий сервер, лише відкриває вікно й одразу завершується",
+      second.returncode == 0 and len(procs) == 1 and "--app=" in open(calls).read(),
+      [second.returncode, subprocess.run(["ps", "-eo", "pid,ppid,args"], capture_output=True, text=True).stdout[-900:]])
 post(8765, "/api/shutdown", {})
-check("сервер, запущений ярликом, закривається кнопкою", wait(lambda: not up(8765), 8))
-os.remove(os.path.join(APP, "data", "launcher.log")) if os.path.exists(os.path.join(APP, "data", "launcher.log")) else None
+check("«Закрити додаток»: сервер зупинився, програма теж завершилась", wait(lambda: not up(8765), 8) and wait(lambda: first.poll() is not None, 8))
+check("у launcher.log записано «сервер закрито»", "сервер закрито" in open(os.path.join(APP, "data", "launcher.log")).read())
 r = subprocess.run([sys.executable, os.path.join(APP, "make_app.py"), "--dest", dest, "--remove"], capture_output=True, text=True)
 check("make_app.py --remove прибирає застосунок", not os.path.exists(bundle))
+# запасний варіант без компілятора
+noc = subprocess.run([sys.executable, os.path.join(APP, "make_app.py"), "--dest", dest], capture_output=True, text=True,
+                     env=dict(os.environ, PATH="/nonexistent", SMC_APP_SHELL=shell))
+check("без компілятора: ярлик-скрипт і зрозуміле попередження", noc.returncode == 0 and open(exe, "rb").read(2) == b"#!"
+      and "не скомпільовано" in noc.stdout, noc.stdout + noc.stderr)
+shutil.rmtree(bundle, ignore_errors=True)
 
 print("\nПІДСУМОК: " + ("усі перевірки пройдено" if ok else "Є ПОМИЛКИ"), "| скріншоти:", shots)
 sys.exit(0 if ok else 1)

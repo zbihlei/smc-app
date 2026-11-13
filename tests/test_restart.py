@@ -55,7 +55,7 @@ try:
         pg.evaluate("window.__old = 1")
         pg.on("dialog", lambda d: d.accept())
         pg.click("#btnRestart")
-        pg.wait_for_function("() => window.__old === undefined && !!document.querySelector('#appFoot') && document.querySelector('#appFoot').textContent.includes('SMC App v')", timeout=30000)
+        pg.wait_for_function("() => window.__old === undefined && !!document.querySelector('#appFoot') && document.querySelector('#appFoot').textContent.includes('Rulebound v')", timeout=30000)
         check("після натискання сторінка сама відкрилась заново (свіже завантаження), версія в підвалі", "/?r=" in pg.url, pg.url)
         b.close()
     check("процес той самий (exec, а не новий) і працює", p.poll() is None and wait_up() is not None)
@@ -66,7 +66,7 @@ finally:
     except Exception:
         p.kill()
         out = ""
-check("у лозі сервера — «Перезапуск додатка…» і другий старт", "Перезапуск додатка" in out and out.count("SMC App 1.") >= 2, out[-400:])
+check("у лозі сервера — «Перезапуск додатка…» і другий старт", "Перезапуск додатка" in out and out.count("Rulebound 2.") >= 2, out[-400:])
 
 print("\nПІДСУМОК: " + ("усі перевірки пройдено" if ok else "Є ПОМИЛКИ"))
 sys.exit(0 if ok else 1)

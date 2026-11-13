@@ -1,4 +1,4 @@
-/* SMC App — інтерфейс (етап 1: Скринер + Налаштування) */
+/* Rulebound — інтерфейс (етап 1: Скринер + Налаштування) */
 "use strict";
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -172,7 +172,7 @@ async function pollStatus() {
     S.status = st;
     S.running = !!st.running;
     const ft = $("#appFoot"), ver = st.env && st.env.app_version;
-    if (ft && ver) ft.textContent = "SMC App v" + ver;
+    if (ft && ver) ft.textContent = "Rulebound v" + ver;
     if (st.last_exit && !st.running && !pollStatus.exitShown) {
       pollStatus.exitShown = true;
       showMsg(`Скринер завершився сам о ${st.last_exit.at} (код ${st.last_exit.code}). Причина — у лозі внизу.`, true);
@@ -263,7 +263,7 @@ function renderAll() {
       ". Час вирішувати, чи ставити лімітку: перевір 1h.";
     za.classList.remove("hidden");
   } else za.classList.add("hidden");
-  document.title = (inZone.length ? "🟢 В ЗОНІ: " + inZone.map(r => r.symbol.replace(/USDT$/, "")).join(", ") + " | " : "") + "SMC App";
+  document.title = (inZone.length ? "🟢 В ЗОНІ: " + inZone.map(r => r.symbol.replace(/USDT$/, "")).join(", ") + " | " : "") + "Rulebound";
   renderStale();
   renderTable();
   renderCharts();
@@ -771,8 +771,8 @@ $("#btnSelftest").addEventListener("click", async () => {
 $("#btnShutdown").addEventListener("click", async () => {
   if (!confirm("Закрити додаток? Скринер, якщо працює, продовжить працювати.")) return;
   const r = await api("/api/shutdown", {});
-  document.body.innerHTML = `<div class="closed"><h2>SMC App закрито</h2>
-    <p>${r.screener_running ? "Скринер працює далі у фоні: алерти приходитимуть. " : ""}Щоб відкрити знову — «SMC App» у Dock / Launchpad
+  document.body.innerHTML = `<div class="closed"><h2>Rulebound закрито</h2>
+    <p>${r.screener_running ? "Скринер працює далі у фоні: алерти приходитимуть. " : ""}Щоб відкрити знову — «Rulebound» у Dock / Launchpad
     (або <code>python3 app.py</code> у папці додатка). Це вікно можна закрити.</p></div>`;
 });
 
@@ -780,7 +780,7 @@ $("#btnShutdown").addEventListener("click", async () => {
 $("#btnRestart").addEventListener("click", async () => {
   if (!confirm("Перезапустити додаток? Скринери, якщо працюють, продовжать працювати.")) return;
   try { await api("/api/restart", {}); } catch (e) { /* сервер міг закритись раніше, ніж відповів */ }
-  document.body.innerHTML = '<div class="closed"><h2>Перезапускаю SMC App…</h2><p>Сторінка відкриється сама за кілька секунд.</p></div>';
+  document.body.innerHTML = '<div class="closed"><h2>Перезапускаю Rulebound…</h2><p>Сторінка відкриється сама за кілька секунд.</p></div>';
   const t0 = Date.now();
   const tick = async () => {
     try {
@@ -788,7 +788,7 @@ $("#btnRestart").addEventListener("click", async () => {
       if (r.ok && Date.now() - t0 > 1500) return location.replace("/?r=" + Date.now());
     } catch (e) { /* ще не піднявся */ }
     if (Date.now() - t0 > 60000) {
-      document.body.innerHTML = '<div class="closed"><h2>Додаток не відповів</h2><p>Відкрий «SMC App» з Dock ще раз.</p></div>';
+      document.body.innerHTML = '<div class="closed"><h2>Додаток не відповів</h2><p>Відкрий «Rulebound» з Dock ще раз.</p></div>';
       return;
     }
     setTimeout(tick, 500);
@@ -833,7 +833,7 @@ function renderTg(env) {
   const el = $("#tgState");
   let h;
   if (!env.tg_token_set) h = `<span class="no">✗</span> Немає токена бота. Створи бота в @BotFather і додай у Терміналі:
-      <code>echo 'export SMC_TG_TOKEN="ТОКЕН"' &gt;&gt; ~/.zshrc</code>, потім «Закрити додаток» і знову SMC App.`;
+      <code>echo 'export SMC_TG_TOKEN="ТОКЕН"' &gt;&gt; ~/.zshrc</code>, потім «Закрити додаток» і знову Rulebound.`;
   else if (!env.tg_chat) h = `<span class="warnc">!</span> Токен є. Відкрий свого бота в Telegram, натисни <b>Start</b>, потім — «Підключити Telegram».`;
   else h = `<span class="ok">✓</span> Підключено${env.tg_name ? ": " + esc(env.tg_name) : ""} (chat ${esc(env.tg_chat)})`
     + (env.tg_enabled ? "" : " — <b>надсилання вимкнено</b>");
@@ -853,5 +853,16 @@ async function tgAction(path, okText) {
 }
 $("#tgConnect").addEventListener("click", () => tgAction("/api/telegram/connect",
   r => `Підключено ✓ Перевір Telegram — там повідомлення від @${r.bot}.` + (r.screener_running ? " Скринер уже перезапущено — алерти йдуть у Telegram." : "")));
+$("#tgBrand").addEventListener("click", async () => {
+  const b = $("#tgBrand");
+  b.disabled = true;
+  try {
+    const r = await api("/api/telegram/brand", {});
+    const err = Object.entries(r.errors || {}).map(([k, v]) => `${k}: ${v}`).join("; ");
+    showMsg((r.done && r.done.length ? "Профіль бота оновлено: " + r.done.join(", ") + "." : "")
+      + (err ? " Не вдалося — " + err : ""), !!err);
+  } catch (e) { showMsg(String(e), true); }
+  finally { b.disabled = false; }
+});
 $("#tgTest").addEventListener("click", () => tgAction("/api/telegram/test", () => "Тест надіслано ✓ Перевір Telegram."));
 $("#tgOff").addEventListener("click", () => { if (confirm("Відключити Telegram?")) tgAction("/api/telegram/disconnect", () => "Відключено."); });

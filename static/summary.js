@@ -1,4 +1,4 @@
-/* SMC App — вкладка «Підсумок» (етап 3). Використовує $, $$, esc, api, store (app.js) і ua2 (journal.js). */
+/* Rulebound — вкладка «Підсумок» (етап 3). Використовує $, $$, esc, api, store (app.js) і ua2 (journal.js). */
 "use strict";
 
 const SS = { period: "all", data: null };

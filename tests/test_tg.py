@@ -72,7 +72,7 @@ for k in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
 sys.path.insert(0, APP)
 import tg  # noqa: E402
 tg.API = API
-txt = tg.format_alert("SMC-скринер", "ЦІНА В ЗОНІ (наживо): SOLUSDT Short | ціна 95.1 | вхід 94.84 стоп 97.13 ціль 87 R:R 3.4 | УВАГА: ніж: різка свічка <x>",
+txt = tg.format_alert("Rulebound", "ЦІНА В ЗОНІ (наживо): SOLUSDT Short | ціна 95.1 | вхід 94.84 стоп 97.13 ціль 87 R:R 3.4 | УВАГА: ніж: різка свічка <x>",
                       "zone", "BINANCE:SOLUSDT.P")
 check("формат: 🔴, жирний заголовок, ⚠️ для «УВАГА», HTML екрановано, посилання на 4h TradingView",
       txt.startswith("🔴 <b>ЦІНА В ЗОНІ (наживо): SOLUSDT Short</b>") and "⚠️ УВАГА" in txt and "&lt;x&gt;" in txt
@@ -139,7 +139,7 @@ try:
         pg.click("#tgConnect")
         expect(pg.locator("#tgMsg")).to_contain_text("Підключено ✓")
         expect(pg.locator("#tgState")).to_contain_text("Michel")
-        check("Підключити: знайдено чат 777, надіслано «SMC App підключено»", SENT and SENT[-1]["chat_id"] == "777" and "підключено" in SENT[-1]["text"])
+        check("Підключити: знайдено чат 777, надіслано «Rulebound підключено»", SENT and SENT[-1]["chat_id"] == "777" and "підключено" in SENT[-1]["text"])
         st = json.load(open(os.path.join(data, "settings.json")))
         check("у налаштуваннях лише chat id, токена там немає", st["tg_chat"] == "777" and TOKEN not in json.dumps(st))
         pg.click("#tgTest")
@@ -167,9 +167,9 @@ try:
     A.SETTINGS_PATH = os.path.join(data, "settings.json")
     A.LOG_PATH = os.path.join(data, "screener.log")
     SENT.clear()
-    A.notify_mac("SMC App: скринер зупинився", "Скринер завершився сам о 12:00:00.")
+    A.notify_mac("Rulebound: скринер зупинився", "Скринер завершився сам о 12:00:00.")
     time.sleep(1.5)
-    check("службове сповіщення «скринер зупинився» дублюється в Telegram", SENT and "⚠️ <b>SMC App: скринер зупинився</b>" in SENT[-1]["text"], SENT)
+    check("службове сповіщення «скринер зупинився» дублюється в Telegram", SENT and "⚠️ <b>Rulebound: скринер зупинився</b>" in SENT[-1]["text"], SENT)
 finally:
     app.terminate()
     srv.shutdown()

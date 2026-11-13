@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SMC App</title>
+<title>Rulebound</title>
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 <header class="top">
-  <div class="brand">SMC<span>App</span></div>
+  <div class="brand"><img class="logo" src="/favicon.png" alt="">Rule<span>bound</span></div>
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="screener" role="tab">Скринер</button>
     <button class="tab" data-tab="spot" role="tab">Спот</button>
@@ -481,6 +481,7 @@
         <div class="tg-actions">
           <button class="btn small primary" type="button" id="tgConnect">Підключити Telegram</button>
           <button class="btn small" type="button" id="tgTest">Надіслати тест</button>
+          <button class="btn small" type="button" id="tgBrand" title="Назва «Rulebound», опис і лого в профілі бота. @username бота змінюється лише в @BotFather.">Оновити профіль бота</button>
           <button class="btn small" type="button" id="tgOff">Відключити</button>
           <span id="tgMsg" class="muted small"></span>
         </div>
@@ -545,7 +546,7 @@
         <code>SMC_SHEET_URL</code> і <code>SMC_SHEET_TOKEN</code> (див. README).</p>
       <button class="btn" id="btnSelftest" type="button">Перевірити скринер (selftest)</button>
       <h3 class="mt">Додаток</h3>
-      <p class="muted small">Якщо додаток запущено ярликом «SMC App» (без Терміналу), закрити його можна тут.
+      <p class="muted small">Якщо додаток запущено ярликом «Rulebound» (без Терміналу), закрити його можна тут.
         Скринер, якщо працює, після цього <b>не зупиняється</b> — алерти приходитимуть далі.</p>
       <button class="btn" id="btnRestart" type="button" title="Перезапустити сам додаток (сервер і сторінку). Скринери працюють далі.">Перезапустити додаток</button>
       <button class="btn danger" id="btnShutdown" type="button">Закрити додаток</button>

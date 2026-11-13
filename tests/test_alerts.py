@@ -45,7 +45,7 @@ def say(text):
 def alert_new(rows, seen_path):
     for sym, kind in rows:
         title = "ЦІНА В ЗОНІ" if kind == "zone" else "НОВА ПАРА"
-        mod.notify("SMC-скринер", f"{title}: {sym} Long | бали 1 | вхід 1", kind, f"New pair {sym} long", "BINANCE:" + sym)
+        mod.notify("Rulebound", f"{title}: {sym} Long | бали 1 | вхід 1", kind, f"New pair {sym} long", "BINANCE:" + sym)
     return len(rows)
 
 
@@ -83,7 +83,7 @@ check("Telegram — усі 10 окремо (як і було)", len(tgs) == 10)
 
 # ---- 3. живі алерти «ціна в зоні» між сканами — теж по черзі
 mac.clear(), spoken.clear()
-ths = [threading.Thread(target=mod.notify, args=("SMC-скринер", f"ЦІНА В ЗОНІ: P{i}USDT Long", "zone", f"Price in zone P{i}", "")) for i in range(3)]
+ths = [threading.Thread(target=mod.notify, args=("Rulebound", f"ЦІНА В ЗОНІ: P{i}USDT Long", "zone", f"Price in zone P{i}", "")) for i in range(3)]
 [x.start() for x in ths]
 [x.join() for x in ths]
 mod._mac_queue.wait_idle()
@@ -104,8 +104,8 @@ busy.update(n=0, max=0)
 mod.ALERT["voice"] = True
 q2 = R.MacQueue(mod, mac_notify, say=say, gap=0.05)
 for i in range(3):
-    mod._mac_queue.put("SMC-скринер", f"НОВА ПАРА: C{i}USDT Long", "new", f"New pair C{i}", "")
-    q2.put("SMC-скринер ФОРЕКС", f"НОВА ПАРА: EURUSD{i} Long", "new", f"New pair EURUSD{i}", "")
+    mod._mac_queue.put("Rulebound", f"НОВА ПАРА: C{i}USDT Long", "new", f"New pair C{i}", "")
+    q2.put("Rulebound ФОРЕКС", f"НОВА ПАРА: EURUSD{i} Long", "new", f"New pair EURUSD{i}", "")
 mod._mac_queue.wait_idle(), q2.wait_idle()
 sp = sorted(t for t, _ in spoken)
 check("крипто + форекс одночасно → голоси все одно по черзі (спільний замок)", len(spoken) == 6 and busy["max"] == 1

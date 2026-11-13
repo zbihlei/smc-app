@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Створює на Mac застосунок «SMC App.app» — запуск додатка без Терміналу (етап 4).
+Створює на Mac застосунок «Rulebound.app» — запуск додатка без Терміналу (етап 4).
 
     cd ~/Desktop/smc_app && python3 make_app.py            # у ~/Applications (видно в Launchpad і Spotlight)
     python3 make_app.py --dest ~/Desktop                   # або в іншу папку
     python3 make_app.py --remove                           # прибрати
 
-Що робить «SMC App» при запуску:
+Що робить «Rulebound» при запуску:
   1) підвантажує ~/.zshrc (там SMC_SHEET_URL / SMC_SHEET_TOKEN для аркуша «Скринер»);
   2) якщо сервер додатка ще не працює — запускає його у фоні (`python3 app.py --no-browser`, лог у data/app.log);
   3) відкриває додаток окремим вікном Chrome без вкладок і адресного рядка (`--app`), а без Chrome — у браузері.
@@ -20,7 +20,7 @@
 щоб писати копії журналу в iCloud Drive) тримається лише за справжньою підписаною програмою. Тому виконуваний
 файл застосунку — крихітна програма (компілюється тут же через clang з Command Line Tools і підписується
 codesign), яка запускає скрипт `Resources/launcher.sh` і лишається «батьком» сервера, поки він працює.
-Після кожної перезбірки дозвіл треба надати заново (у списку прибрати старий «SMC App» і додати новий).
+Після кожної перезбірки дозвіл треба надати заново (у списку прибрати старий «Rulebound» і додати новий).
 """
 import argparse
 import os
@@ -31,12 +31,12 @@ import sys
 import tempfile
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
-NAME = "SMC App"
+NAME = "Rulebound"
 BUNDLE_ID = "local.smcapp.launcher"
 PORT = 8765
 
 LAUNCHER = r'''#!/bin/zsh
-# SMC App: запуск без Терміналу. Згенеровано make_app.py — не редагуй руками, перезбери: python3 make_app.py
+# Rulebound: запуск без Терміналу. Згенеровано make_app.py — не редагуй руками, перезбери: python3 make_app.py
 APP_DIR=__APP_DIR__
 PY=__PYTHON__
 PORT=__PORT__
@@ -49,7 +49,7 @@ LOG="$APP_DIR/data/launcher.log"
 export PATH="$PATH:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 alert() {
-  /usr/bin/osascript -e "display alert \"SMC App\" message \"$1\" as critical" >/dev/null 2>&1
+  /usr/bin/osascript -e "display alert \"Rulebound\" message \"$1\" as critical" >/dev/null 2>&1
 }
 up() { /usr/bin/curl -s -o /dev/null --max-time 1 "$URL/api/status"; }
 
@@ -80,7 +80,7 @@ else
 fi
 
 # Якщо сервер запустили ми — чекаємо, поки його закриють («Налаштування → Закрити додаток»).
-# Так програма SMC App лишається «батьком» сервера, і дозволи macOS (iCloud Drive) діють і для нього.
+# Так програма Rulebound лишається «батьком» сервера, і дозволи macOS (iCloud Drive) діють і для нього.
 if [ -n "$SERVER_PID" ]; then
   wait "$SERVER_PID"
   echo "$(date '+%F %T') сервер закрито" >> "$LOG"
@@ -88,8 +88,8 @@ fi
 '''
 
 
-STUB_C = r'''/* SMC App: виконуваний файл застосунку. Запускає Resources/launcher.sh і чекає на нього,
-   щоб дозволи macOS, надані «SMC App», діяли й для сервера додатка. Згенеровано make_app.py. */
+STUB_C = r'''/* Rulebound: виконуваний файл застосунку. Запускає Resources/launcher.sh і чекає на нього,
+   щоб дозволи macOS, надані «Rulebound», діяли й для сервера додатка. Згенеровано make_app.py. */
 #include <limits.h>
 #include <libgen.h>
 #include <spawn.h>
@@ -201,7 +201,7 @@ def build(dest, python):
 
 
 def main():
-    p = argparse.ArgumentParser(description="Створити «SMC App.app» для запуску без Терміналу")
+    p = argparse.ArgumentParser(description="Створити «Rulebound.app» для запуску без Терміналу")
     p.add_argument("--dest", default="~/Applications", help="куди покласти застосунок (~/Applications)")
     p.add_argument("--remove", action="store_true", help="видалити створений застосунок")
     a = p.parse_args()
@@ -214,6 +214,15 @@ def main():
         else:
             print(f"Немає: {app}")
         return
+    legacy = os.path.join(dest, "SMC App.app")   # стара назва (до v2.0): прибрати, якщо це наш згенерований ярлик
+    try:
+        with open(os.path.join(legacy, "Contents", "Resources", "launcher.sh"), encoding="utf-8") as f:
+            ours = "make_app.py" in f.read()
+    except OSError:
+        ours = False
+    if ours:
+        shutil.rmtree(legacy, ignore_errors=True)
+        print(f"Старий ярлик прибрано: {legacy}")
     if sys.platform != "darwin":
         print("Увага: це не macOS — застосунок створю, але запускати його можна лише на Mac.")
     os.makedirs(dest, exist_ok=True)
@@ -224,11 +233,11 @@ def main():
               "можуть не писатись. Встанови Command Line Tools: xcode-select --install, і запусти make_app.py ще раз.")
     else:
         print("Програма-обгортка: скомпільовано" + (", підписано (codesign)" if signed else "") + ".")
-        print("Якщо «SMC App» уже є в «Повному доступі до диска» — прибери його там (−) і додай знову (+): "
+        print("Якщо «Rulebound» уже є в «Повному доступі до диска» — прибери його там (−) і додай знову (+): "
               "після перезбірки старий дозвіл не діє.")
     print(f"Папка додатка: {APP_DIR}")
     print(f"Python: {sys.executable}")
-    print("Відкрити: Launchpad / Spotlight → «SMC App». Щоб був у Dock — перетягни його з Finder у Dock.")
+    print("Відкрити: Launchpad / Spotlight → «Rulebound». Щоб був у Dock — перетягни його з Finder у Dock.")
     if sys.platform == "darwin":
         subprocess.run(["open", "-R", app], check=False)  # показати у Finder
 

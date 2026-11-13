@@ -1,4 +1,4 @@
-/* SMC App — вкладка «Стратегія»: документ у Markdown, редагування, історія версій. Використовує $, $$, esc, api з app.js */
+/* Rulebound — вкладка «Стратегія»: документ у Markdown, редагування, історія версій. Використовує $, $$, esc, api з app.js */
 "use strict";
 
 const ST = { data: null, editing: false, viewing: null };

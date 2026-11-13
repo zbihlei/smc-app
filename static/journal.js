@@ -1,4 +1,4 @@
-/* SMC App — вкладка «Журнал» (етап 2). Використовує $, $$, esc, api, store з app.js */
+/* Rulebound — вкладка «Журнал» (етап 2). Використовує $, $$, esc, api, store з app.js */
 "use strict";
 
 const JS = {

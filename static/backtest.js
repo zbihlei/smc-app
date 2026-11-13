@@ -1,4 +1,4 @@
-/* SMC App — вкладка «Бектест»: етап 1 (дані) і етап 2 (сигнали). Використовує $, esc, api (app.js). */
+/* Rulebound — вкладка «Бектест»: етап 1 (дані) і етап 2 (сигнали). Використовує $, esc, api (app.js). */
 "use strict";
 
 const BTS = { dataErr: "", data: null, timer: null, sigRun: null, sigRes: null, sigErr: "", tr: null, trLoaded: false };
@@ -152,7 +152,7 @@ function renderBtSignals() {
   const d = BTS.data, sg = d.signals;
   if (!sg) {
     $("#btSigStart").disabled = true;
-    sigMsg("Сервер додатка ще старої версії. Натисни «Закрити додаток» і знову відкрий SMC App.", "err");
+    sigMsg("Сервер додатка ще старої версії. Натисни «Закрити додаток» і знову відкрий Rulebound.", "err");
     return;
   }
   const p = sg.progress || {}, run = sg.running;

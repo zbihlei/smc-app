@@ -116,9 +116,9 @@ mod = SR.load_screener(os.path.join(APP, "smc_screener.py"))
 sent = []
 mod.notify = lambda title, text, kind="new", speak="", ticker="": sent.append((title, speak, ticker))
 fx_runner.install_fx(mod, FX.Source(stale))
-mod.notify("SMC-скринер", "НОВА ПАРА: EURUSD Long", "new", "New pair EU long", mod.tv_ticker("EURUSD"))
-check("алерт: «SMC-скринер ФОРЕКС», голос називає пару повністю, TradingView FX:EURUSD",
-      sent == [("SMC-скринер ФОРЕКС", "New pair EURUSD long", "FX:EURUSD")], sent)
+mod.notify("Rulebound", "НОВА ПАРА: EURUSD Long", "new", "New pair EU long", mod.tv_ticker("EURUSD"))
+check("алерт: «Rulebound ФОРЕКС», голос називає пару повністю, TradingView FX:EURUSD",
+      sent == [("Rulebound ФОРЕКС", "New pair EURUSD long", "FX:EURUSD")], sent)
 try:
     mod.fetch_top_symbols(100)
     check("MT5 закритий → скан не вдається (повтор за 2 хв), а не порожній список", False)

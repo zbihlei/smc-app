@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-SMC-скринер v1: шукає на Binance (USDT-пари, 4h) кандидатів за правилами стратегії:
+Rulebound v1: шукає на Binance (USDT-пари, 4h) кандидатів за правилами стратегії:
   1) тренд за останнім BOS (закриття свічки за свінгом);
   2) ордерблок на початку імпульсу, що дав BOS, з імбалансом (FVG) в імпульсі;
   3) ціна наближається до зони або в ній (перший дотик);
@@ -703,7 +703,7 @@ def tv_ticker(symbol):
 def save_watchlist(rows, path):
     """Файл для імпорту в TradingView: Watchlist -> ... -> Import list. Перезаписується кожного скану."""
     with open(path, "w", encoding="utf-8") as f:
-        f.write("###SMC-скринер,\n" + ",".join(tv_ticker(r["symbol"]) for r in rows) + "\n")
+        f.write("###Rulebound,\n" + ",".join(tv_ticker(r["symbol"]) for r in rows) + "\n")
 
 
 def play_sound(name):
@@ -776,7 +776,7 @@ def alert_new(rows, seen_path):
         line = (f"{kind}: {r['symbol']} {r['dir']}{' БРЕЙКЕР' if r.get('zone_type') == 'брейкер' else ''} | бали {r['score']} | {r['status']} | вхід {fmt(r['entry'])} стоп {fmt(r['stop'])} "
                 f"ціль {fmt(r['target'])} R:R {r['rr']:.1f}" + (f" | {r['sweep'].upper()}" if r["sweep"] else "") + (f" | ОБСЯГ: {r['volume']}" if r["volume"] != "-" else "") + (" | УВАГА: " + "; ".join(r["flags"]) if r["flags"] else ""))
         print("  >>> " + line)
-        notify("SMC-скринер", line, "zone" if kind == "ЦІНА В ЗОНІ" else "new",
+        notify("Rulebound", line, "zone" if kind == "ЦІНА В ЗОНІ" else "new",
                f"{'Price in zone' if kind == 'ЦІНА В ЗОНІ' else 'New pair'} {r['symbol'][:-4]} {'long' if r['dir'] == 'Long' else 'short'}",
                tv_ticker(r["symbol"]))
     return len(new)
@@ -984,7 +984,7 @@ def save_html(rows, path, stamp, cfg, max_charts=None, refresh_s=0):
     tz = time.localtime().tm_gmtoff
     in_zone = [r for r in rows if r["rank"] == 0]
     parts = ["<html><head><meta charset='utf-8'>" + (f"<meta http-equiv='refresh' content='{int(refresh_s)}'>" if refresh_s else "")
-             + "<title>" + ("\U0001F534 В ЗОНІ: " + ", ".join(r["symbol"][:-4] for r in in_zone) + " | " if in_zone else "") + "SMC-скринер</title>",
+             + "<title>" + ("\U0001F534 В ЗОНІ: " + ", ".join(r["symbol"][:-4] for r in in_zone) + " | " if in_zone else "") + "Rulebound</title>",
              "<style>body{font-family:Arial;margin:24px;background:#f5f6f8}table{border-collapse:collapse;background:#fff}td,th{border:1px solid #ccc;padding:6px 10px;font-size:14px}"
              "th{background:#dce6f1}.s0{background:#ffd9d9}.s1{background:#fff8e1}.s2{background:#ececec}"
              ".act0{color:#b00020;font-weight:bold}.s0 td{border-color:#d32f2f}"
@@ -992,7 +992,7 @@ def save_html(rows, path, stamp, cfg, max_charts=None, refresh_s=0):
              ".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(620px,1fr));gap:18px;margin-top:22px}"
              ".card{background:#fff;border:1px solid #d1d4dc;border-radius:6px;padding:10px}.hd{font-size:14px;margin-bottom:6px}"
              ".chart{position:relative;width:100%}.note{color:#555;font-size:12px;margin-top:14px}</style></head><body>",
-             f"<h2>SMC-скринер, {html.escape(stamp)}</h2>",
+             f"<h2>Rulebound, {html.escape(stamp)}</h2>",
              "<p>Кандидати для ручної перевірки, а не сигнали. Не є фінансовою порадою.</p>"]
     if in_zone:
         parts.append("<div class='alert'>\U0001F534 Ціна вже в зоні: " + "; ".join(
@@ -1467,7 +1467,7 @@ def fire_live(a, r, px, seen_path, stamp):
             f"вхід {fmt(r['entry'])} стоп {fmt(r['stop'])} ціль {fmt(r['target'])} R:R {r['rr']:.1f} | бали {r['score']}"
             + (" | УВАГА: " + "; ".join(r["flags"]) if r["flags"] else "") + " | перевір 1h")
     print("  >>> " + line)
-    notify("SMC-скринер", line, "zone", f"Price in zone {r['symbol'][:-4]} {'long' if r['dir'] == 'Long' else 'short'}", tv_ticker(r["symbol"]))
+    notify("Rulebound", line, "zone", f"Price in zone {r['symbol'][:-4]} {'long' if r['dir'] == 'Long' else 'short'}", tv_ticker(r["symbol"]))
     try:
         try:
             with open(seen_path, encoding="utf-8") as f:
@@ -1553,7 +1553,7 @@ def watch(a, cfg):
 
 
 def main():
-    p = argparse.ArgumentParser(description="SMC-скринер v1 для Binance (кандидати для ручної перевірки, не сигнали)")
+    p = argparse.ArgumentParser(description="Rulebound v1 для Binance (кандидати для ручної перевірки, не сигнали)")
     p.add_argument("--top", type=int, default=60, help="скільки USDT-пар із найбільшим обсягом перевіряти (60)")
     p.add_argument("--symbols", type=str, default="", help="свій список через кому, напр. SOLUSDT,ADAUSDT (тоді --top ігнорується)")
     p.add_argument("--interval", default="4h", help="таймфрейм (4h)")
@@ -1647,9 +1647,9 @@ def main():
         time.sleep(3)
         return
     if a.test_alert:
-        notify("SMC-скринер (тест)", "НОВА ПАРА: TESTUSDT Short | тестове сповіщення", "new", "New pair test short")
+        notify("Rulebound (тест)", "НОВА ПАРА: TESTUSDT Short | тестове сповіщення", "new", "New pair test short")
         time.sleep(2)
-        notify("SMC-скринер (тест)", "ЦІНА В ЗОНІ: TESTUSDT Short | тестове сповіщення", "zone", "Price in zone test short")
+        notify("Rulebound (тест)", "ЦІНА В ЗОНІ: TESTUSDT Short | тестове сповіщення", "zone", "Price in zone test short")
         time.sleep(2)
         return
     if a.spot:

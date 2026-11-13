@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Telegram-алерти для SMC App: бот лише НАДСИЛАЄ повідомлення тобі (без команд).
+Telegram-алерти для Rulebound: бот лише НАДСИЛАЄ повідомлення тобі (без команд).
 
 Токен бота — у змінній середовища SMC_TG_TOKEN (рядок у ~/.zshrc), не в коді й не в налаштуваннях.
 Номер чату (chat id) не секретний: додаток знаходить його сам («Налаштування → Telegram → Підключити»)
@@ -103,6 +103,51 @@ def find_chat():
             name = " ".join(x for x in (chat.get("first_name"), chat.get("last_name")) if x) or chat.get("username") or ""
             return chat["id"], name
     return None, None
+
+
+BRAND_NAME = "Rulebound"
+BRAND_SHORT = "Алерти Rulebound: ситуації за твоїми правилами. Не фінансова порада."
+BRAND_DESC = ("Rulebound — робоче місце трейдера, який торгує за записаними правилами. "
+              "Бот лише надсилає алерти з твого додатка: нова ситуація, ціна в зоні, уточнення входу. "
+              "Рішення завжди за тобою; це не фінансова порада.")
+
+
+def _upload(method, params, files, timeout=30):
+    """Виклик Bot API з файлом (multipart). Потрібна бібліотека requests."""
+    if requests is None:
+        raise TgError("для завантаження фото потрібен пакет requests")
+    tok = token()
+    if not tok:
+        raise TgError("не задано SMC_TG_TOKEN (рядок у ~/.zshrc)")
+    try:
+        r = requests.post(f"{API}/bot{tok}/{method}", data=params, files=files, timeout=timeout)
+        d = r.json()
+    except Exception as e:
+        raise TgError(f"немає зв'язку з Telegram ({e.__class__.__name__})")
+    if not d.get("ok"):
+        raise TgError(d.get("description") or f"HTTP {r.status_code}")
+    return d.get("result")
+
+
+def set_brand(photo_path=None):
+    """Назва, короткий і повний опис, фото профілю бота. Кожен крок окремо: збій одного не скасовує інших."""
+    done, errors = [], {}
+    steps = [("назва", lambda: _call("setMyName", {"name": BRAND_NAME})),
+             ("короткий опис", lambda: _call("setMyShortDescription", {"short_description": BRAND_SHORT})),
+             ("опис", lambda: _call("setMyDescription", {"description": BRAND_DESC}))]
+    if photo_path and os.path.exists(photo_path):
+        def photo():
+            with open(photo_path, "rb") as f:
+                return _upload("setMyProfilePhoto", {"photo": json.dumps({"type": "static", "photo": "attach://pic"})},
+                               {"pic": ("rulebound.jpg", f, "image/jpeg")})
+        steps.append(("фото", photo))
+    for label, fn in steps:
+        try:
+            fn()
+            done.append(label)
+        except TgError as e:
+            errors[label] = str(e)
+    return {"done": done, "errors": errors}
 
 
 def bot_name():

@@ -65,7 +65,7 @@ def install_fx(mod, src):
         pair = ticker.split(":")[-1] if ticker else ""
         if speak and pair:  # скринер обрізає «USDT» з кінця назви — для форексу назва ціла
             speak = re.sub(r"^(New pair|Price in zone) \S+", lambda m: f"{m.group(1)} {pair}", speak)
-        orig_notify("SMC-скринер ФОРЕКС" if title == "SMC-скринер" else title, text, kind, speak, ticker)
+        orig_notify("Rulebound ФОРЕКС" if title == "Rulebound" else title, text, kind, speak, ticker)
 
     mod.notify = notify
 
