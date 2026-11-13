@@ -403,25 +403,35 @@ $("#btnRefresh").addEventListener("click", () => {
   if (typeof lvLoadLtf === "function") lvLoadLtf();
 });
 // спливаючі вікна алертів: швидкий перемикач (те саме, що «Спливаюче вікно» в «Налаштуваннях»)
+// кнопки-перемикачі алертів на Mac: звук (разом із голосом) і поп-ап вікна — незалежні одна від одної
+const ALERT_BTNS = [
+  { id: "#btnSound", key: "sound", on: "🔊 Звук: увімк.", off: "🔇 Звук: вимк.",
+    msgOn: "Звук алертів на Mac увімкнено.", msgOff: "Звук і голос алертів на Mac вимкнено — банер, поп-ап і Telegram лишаються." },
+  { id: "#btnPopup", key: "popup", on: "🔔 Поп-ап: увімк.", off: "🔕 Поп-ап: вимк.",
+    msgOn: "Поп-ап вікна увімкнено.", msgOff: "Поп-ап вікна вимкнено — алерти приходитимуть банером і в Telegram." },
+];
 function renderPopupBtn() {
-  const on = !(S.settings && S.settings.popup === false);
-  const b = $("#btnPopup");
-  b.textContent = on ? "🔔 Вікна: увімк." : "🔕 Вікна: вимк.";
-  b.classList.toggle("off", !on);
+  for (const a of ALERT_BTNS) {
+    const on = !(S.settings && S.settings[a.key] === false);
+    const b = $(a.id);
+    b.textContent = on ? a.on : a.off;
+    b.classList.toggle("off", !on);
+  }
 }
-$("#btnPopup").addEventListener("click", async () => {
-  const b = $("#btnPopup");
-  const on = !(S.settings && S.settings.popup === false);
-  b.disabled = true;
-  try {
-    const r = await api("/api/settings", { settings: { popup: !on } });
-    if (r.settings) { S.settings = r.settings; fillForm(r.settings); }
-    renderPopupBtn();
-    showMsg(!on ? "Спливаючі вікна увімкнено." + (r.restarted ? " Скринер перезапущено." : "")
-      : "Спливаючі вікна вимкнено — алерти приходитимуть банером, звуком і в Telegram." + (r.restarted ? " Скринер перезапущено." : ""), false);
-  } catch (e) { showMsg(String(e), true); }
-  finally { b.disabled = false; }
-});
+for (const a of ALERT_BTNS) {
+  $(a.id).addEventListener("click", async () => {
+    const b = $(a.id);
+    const on = !(S.settings && S.settings[a.key] === false);
+    b.disabled = true;
+    try {
+      const r = await api("/api/settings", { settings: { [a.key]: !on } });
+      if (r.settings) { S.settings = r.settings; fillForm(r.settings); }
+      renderPopupBtn();
+      showMsg((!on ? a.msgOn : a.msgOff) + (r.restarted ? " Скринер перезапущено." : ""), false);
+    } catch (e) { showMsg(String(e), true); }
+    finally { b.disabled = false; }
+  });
+}
 api("/api/settings").then(r => { S.settings = r.settings; renderPopupBtn(); }).catch(() => {});
 $("#btnScanNow").addEventListener("click", async () => {
   const r = await api("/api/scan_now" + mkq("?"), {}).catch(e => ({ message: String(e) }));

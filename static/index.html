@@ -58,7 +58,8 @@
       </div>
       <span class="spacer"></span>
       <button class="btn small" id="btnRefresh" type="button" title="Оновити статус, список, лог і графіки (без перезавантаження сторінки)">⟳ Оновити</button>
-      <button class="btn small" id="btnPopup" type="button" title="Спливаючі вікна macOS для алертів: увімкнути / вимкнути (банер, звук і Telegram лишаються)">🔔 Вікна: …</button>
+      <button class="btn small" id="btnSound" type="button" title="Звук і голос алертів на Mac: увімкнути / вимкнути. Банер, поп-ап і Telegram лишаються.">🔊 Звук: …</button>
+      <button class="btn small" id="btnPopup" type="button" title="Спливаючі вікна (поп-ап) macOS для алертів: увімкнути / вимкнути. Банер, звук і Telegram лишаються.">🔔 Поп-ап: …</button>
       <button class="btn small" id="btnScanNow" type="button" title="Не чекати 30 хв — сканувати зараз">Сканувати зараз</button>
       <button class="btn small" id="btnClear" type="button" title="Прибрати всі пари зі списку до наступного скану">Очистити список</button>
       <span id="dataStamp" class="muted"></span>
@@ -459,6 +460,7 @@
         <legend>Сповіщення і стоп</legend>
         <label class="ck"><input name="popup" type="checkbox"> Спливаюче вікно (--popup)</label>
         <label class="ck"><input name="tv_button" type="checkbox"> Кнопка «Відкрити в TradingView» у вікні</label>
+        <label class="ck"><input name="sound" type="checkbox"> Звук алертів на Mac (вимкнено — без звуку й без голосу)</label>
         <label class="ck"><input name="voice" type="checkbox"> Голос (--voice)</label>
         <label class="ck"><input name="stop_wick" type="checkbox"> Стоп за гнотом поруч із зоною (--stop-wick)</label>
         <label class="ck"><input name="spot_auto" type="checkbox"> Вкладка «Спот»: сканувати раз на добу, поки додаток відкритий</label>

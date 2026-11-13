@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.9.5"
+APP_VERSION = "1.9.6"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -70,6 +70,7 @@ DEFAULTS = {
     "trend": "strict",
     "popup": True,
     "voice": True,
+    "sound": True,
     "tv_button": True,
     "stop_wick": True,
     "caffeinate": True,
@@ -90,7 +91,7 @@ LIMITS = {
     "price_check": (0, 600, float), "min_stop_atr": (0, 5, float), "entry_tol": (0, 50, float), "approach_atr": (0, 50, float),
 }
 TRENDS = ("strict", "flag", "bos")
-FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers", "spot_auto", "ltf_enabled", "fx_enabled")
+FLAGS = ("sound", "popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers", "spot_auto", "ltf_enabled", "fx_enabled")
 ICLOUD_DIR = os.path.expanduser("~/Library/Mobile Documents/com~apple~CloudDocs")
 
 
@@ -187,7 +188,12 @@ def build_command(s):
            "--min-volume", num(float(s["min_volume"])),
            "--price-check", num(s["price_check"]), "--min-stop-atr", num(s["min_stop_atr"]),
            "--trend", s["trend"], "--out", results_dir(s)]
+    sound = s.get("sound", True)
+    if not sound:                                     # «Звук: вимк.» — без звуку алерту й без голосу; банер і вікно лишаються
+        cmd += ["--sound-new", "", "--sound-zone", ""]
     for flag, opt in (("popup", "--popup"), ("voice", "--voice"), ("tv_button", "--tv-button"), ("stop_wick", "--stop-wick")):
+        if flag == "voice" and not sound:
+            continue
         if s[flag]:
             cmd.append(opt)
     if not s.get("breakers", True):
@@ -510,7 +516,8 @@ def notify_mac(title, text):
         return
     esc_ = lambda x: str(x).replace("\\", "\\\\").replace('"', '\\"')
     try:
-        subprocess.Popen(["osascript", "-e", f'display notification "{esc_(text)}" with title "{esc_(title)}" sound name "Basso"'],
+        snd = ' sound name "Basso"' if load_settings().get("sound", True) else ""
+        subprocess.Popen(["osascript", "-e", f'display notification "{esc_(text)}" with title "{esc_(title)}"{snd}'],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
         pass

@@ -219,6 +219,16 @@ try:
         pg.click("#btnPopup")
         expect(pg.locator("#btnPopup")).to_have_text(lbl0, timeout=8000)
         check("ще один клік — повертає як було", ("--popup" in json.load(urllib.request.urlopen(URL + "/api/settings", timeout=5))["command"]) == was)
+        _cmd = lambda: json.load(urllib.request.urlopen(URL + "/api/settings", timeout=5))["command"]
+        c0 = _cmd()
+        pg.click("#btnSound")
+        expect(pg.locator("#btnSound")).to_have_text("🔇 Звук: вимк.", timeout=8000)
+        c1 = _cmd()
+        check("кнопка «Звук»: вимкнено → у команді порожні звуки й немає --voice; поп-ап не чіпається",
+              "--sound-new '' --sound-zone ''" in c1 and "--voice" not in c1 and ("--popup" in c1) == ("--popup" in c0), c1)
+        pg.click("#btnSound")
+        expect(pg.locator("#btnSound")).to_have_text("🔊 Звук: увімк.", timeout=8000)
+        check("ще один клік — звук і команда як були", _cmd() == c0, _cmd())
         r = pg.request.post(URL + "/api/scan_now", headers={"X-SMC-App": "1"}, data="{}")
         check("«Сканувати зараз», коли скринер зупинено, — пояснення «натисни Старт»", r.status == 409 and "Старт" in r.json()["message"])
         pg.click("#btnClear")   # підтвердження приймає загальний обробник діалогів
