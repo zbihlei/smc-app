@@ -23,6 +23,7 @@ CURRENCIES = {"USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD", "NZD", "SEK", "NO
               "ZAR", "MXN", "SGD", "HKD", "CNH", "ILS", "RUB"}
 TF_FILE = {"4h": "H4", "1h": "H1", "15m": "M15"}
 TF_S = {"4h": 14400, "1h": 3600, "15m": 900}
+CANDLES_STALE_S = 300  # файли свічок старші (при відкритому ринку) — MT5 щойно запущено, робот ще не переписав свічки
 STALE_S = 180          # status.json не оновлювався довше — термінал закритий або робот знято з графіка
 
 # де шукати папку SMC (MT5 для macOS — це Wine-«пляшка» в ~/Library/Application Support)
@@ -153,6 +154,25 @@ class Source:
         if not out:
             raise FxError(f"{pair}: файл свічок {tf} порожній")
         return out
+
+    def check_candles(self, st, pairs, tf="4h"):
+        """Свічки мають бути свіжими, а не лише status.json: після запуску MT5 робот оновлює стан одразу,
+        а файли свічок — до хвилини пізніше; скан по старих файлах дав би сигнали кількаденної давнини."""
+        if not st.get("market_open", True):
+            return                                  # вихідні: свічки й не мають оновлюватись
+        old = []
+        for p in pairs:
+            try:
+                age = time.time() - os.path.getmtime(os.path.join(st["dir"], f"{p}_{TF_FILE[tf]}.csv"))
+            except OSError:
+                continue
+            if age > CANDLES_STALE_S:
+                old.append((age, p))
+        if old:
+            age, p = max(old)
+            ago = f"{int(age // 3600)} год" if age >= 7200 else f"{int(age // 60)} хв"
+            raise FxError(f"MT5 ще не оновив свічки ({p}: файл {ago} тому; застарілих пар: {len(old)}) — "
+                          "зачекай хвилину після запуску MT5, скан повториться сам")
 
     def prices(self, st=None):
         """Поточні ціни (bid) усіх пар зі status.json."""

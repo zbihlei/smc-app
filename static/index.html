@@ -443,6 +443,7 @@
             <option value="200">від 200 млн $ — лише найліквідніші</option>
           </select></label>
         <label>Відстань «підходу», % (--approach) <input name="approach" type="number" step="0.1" min="0.1"></label>
+        <label title="Показувати пару, лише коли до зони не більше N середніх 4h-свічок цієї пари. Діє разом із відсотками: береться менше з двох. Потрібно для малорухливих ринків (форекс), де 4% — це кілька днів руху. 0 = вимкнути.">Відстань «підходу», середніх свічок (0 = вимкнути) <input name="approach_atr" type="number" step="0.5" min="0" max="50"></label>
         <label>Перевірка ціни, с (0 = вимкнути) <input name="price_check" type="number" step="1" min="0"></label>
         <label>Тісний стоп: поріг × середньої свічки <input name="min_stop_atr" type="number" step="0.1" min="0"></label>
         <label title="Ціна не завжди доходить рівно до середини блока: лімітка ставиться на N% висоти зони ближче до краю, з якого приходить ціна. 0 = середина, 50 = край.">Допуск входу, % висоти зони (--entry-tol) <input name="entry_tol" type="number" step="5" min="0" max="50"></label>
@@ -490,6 +491,8 @@
         <label class="ck"><input name="fx_enabled" type="checkbox"> Форекс-скринер: та сама стратегія по валютних парах, дані — з мого MT5 (робот SMC_Bridge)</label>
         <label>Пари (через кому, лише валютні) <input name="fx_pairs" type="text" spellcheck="false"></label>
         <label>Папка файлів робота (порожньо — знайти автоматично) <input name="fx_dir" type="text" placeholder="авто"></label>
+        <p class="muted small">Для бектесту на форексі: у MT5 у властивостях робота SMC_Bridge тимчасово збільш «Скільки свічок» (InpBars) до 6500, зачекай 2–3 хв і натисни
+          <button class="btn" type="button" id="btnFxExport">Зберегти історію MT5</button> <span id="fxExportMsg"></span></p>
         <details class="fx-howto">
           <summary>Як підключити MT5 (один раз, ≈5 хв)</summary>
           <ol>

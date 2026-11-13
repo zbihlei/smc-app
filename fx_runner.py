@@ -31,6 +31,7 @@ def install_fx(mod, src):
     def fetch_top_symbols(n, min_volume=0.0):
         st = src.status(check_fresh=True)          # MT5 закритий -> скан не вдався -> повтор за 2 хв
         pairs = src.available(st)
+        src.check_candles(st, pairs)                # свічки старі (MT5 щойно запущено) -> теж повтор за 2 хв
         miss = [p for p in src.pairs if p not in pairs]
         if miss:
             print(f"Немає в брокера / ще не завантажено: {', '.join(miss)}")

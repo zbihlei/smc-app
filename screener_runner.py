@@ -219,6 +219,10 @@ def drop_reason(p, rows, rejects, px, approach, touched_at=None):
         when = f" о {touched_at}" if touched_at else ""
         return f"зону відпрацьовано: ціна вже заходила в зону{when} (беру лише перший дотик)" + new_zone
     dist = ((px - zh) / px * 100) if d == "Long" else ((zl - px) / px * 100)
+    n_atr, atr = _arg("--approach-atr", 0.0), float(p.get("atr_pct") or 0)
+    if n_atr and atr > 0 and n_atr * atr < approach and dist > n_atr * atr:
+        return (f"ціна {fm(px)} відійшла на {dist:.1f}% від зони — це {dist / atr:.1f} середньої свічки "
+                f"(показую до {n_atr:g} свічок)") + new_zone
     if dist > approach:
         return f"ціна {fm(px)} відійшла на {dist:.1f}% від зони (показую до {approach:g}%)" + new_zone
     if other:

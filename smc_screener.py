@@ -11,6 +11,7 @@ SMC-скринер v1: шукає на Binance (USDT-пари, 4h) кандид�
   9) v2.9: попередження про різкий рух BTC (--btc-warn 1.5: % за ~1 год, ×2 за ~4 год) у флагах сигналів і алертах.
   10) v2.10 (обидва вимкнені за замовчуванням): --range-struct X — «діапазон біля мінімумів/максимумів» рахується як тренд
       (вниз/вгору «діапазон»), а не «змішана» структура; --eq-levels X — попередження про рівні мінімуми/максимуми поблизу.
+  11) v2.11: --approach-atr N — «підхід» не далі N середніх свічок пари (0 — вимкнено).
   8) v2.8: ордерблок — ТІЛО свічки (--ob-zone body, за замовчуванням); стоп — за гнотом свічки ОБ; уся свічка: --ob-zone candle.
   6) v2.6: брейкер-блоки — пробитий ордерблок протилежного напрямку, якщо пробій дав BOS (вимкнути: --no-breakers).
 
@@ -550,7 +551,10 @@ def analyze_symbol(symbol, candles, px, cfg):
         mark("6 ціна по правильний бік зони")
         total = visits + (1 if (live_touch and not in_visit_last) else 0)
         if total == 0:
-            if dist > cfg["approach"]:
+            near = cfg["approach"]
+            if cfg.get("approach_atr") and volat["atr_pct"] > 0:      # v2.11: не далі N середніх свічок пари
+                near = min(near, cfg["approach_atr"] * volat["atr_pct"])
+            if dist > near:
                 continue
             status, rank = "підхід до зони", 1
         elif total == 1 and live_touch:
@@ -1286,6 +1290,13 @@ def selftest():
     rmax = analyze_symbol("V", with_vol(cv_base, 220.0, 50.0), 94.0, dict(vcfg, max_atr=0.01))
     check("--max-atr відсіює надто волатильну пару", rmax == [])
 
+    # ---- v2.11: «підхід» у середніх свічках
+    _far = analyze_symbol("V", cab[:-1], 96.25, dict(vcfg, approach=15.0))
+    _okf = bool(_far) and _far[0]["rank"] == 1 and _far[0]["atr_pct"] > 0
+    _n = (_far[0]["dist"] / _far[0]["atr_pct"]) if _okf else 0
+    check("v2.11: --approach-atr: зона далі N середніх свічок → не показується, ближче → показується",
+          _okf and analyze_symbol("V", cab[:-1], 96.25, dict(vcfg, approach=15.0, approach_atr=_n * 0.9)) == []
+          and len(analyze_symbol("V", cab[:-1], 96.25, dict(vcfg, approach=15.0, approach_atr=_n * 1.1))) == 1, (_okf, _n))
     # ---- v2.10: діапазон як структура, рівні мінімуми/максимуми
     H = lambda *v: [(i, x) for i, x in enumerate(v)]
     check("v2.10: без --range-struct (0) нічого не змінюється", range_struct(H(0.45, 0.441), H(0.4075, 0.408), 0) == 0)
@@ -1585,6 +1596,9 @@ def main():
     p.add_argument("--rr-at-limit", action="store_true", help="мін. R:R перевіряти від лімітки з допуском (за замовч. — від середини зони)")
     p.add_argument("--btc-warn", type=float, default=1.5,
                    help="попередження, якщо BTC змінився більш ніж на N%% за ~1 год (або 2N%% за ~4 год); 0 — вимкнено (v2.9)")
+    p.add_argument("--approach-atr", type=float, default=0.0, metavar="N",
+                   help="v2.11: показувати «підхід», лише коли до зони не більше N середніх свічок пари (разом із --approach: "
+                        "діє менше з двох). Потрібно для малорухливих ринків (форекс). 0 — вимкнено (за замовч.)")
     p.add_argument("--range-struct", type=float, default=0.0, metavar="X",
                    help="v2.10: «діапазон біля мінімумів» (максимуми не вищі, мінімуми рівні в межах X%%) вважати структурою вниз, "
                         "дзеркально — вгору; у лозі struct4h «вниз (діапазон)» / «вгору (діапазон)». 0 — вимкнено (за замовч.)")
@@ -1644,7 +1658,7 @@ def main():
            "approach": a.approach, "buffer": a.buffer, "min_rr": a.min_rr, "allow_retests": a.allow_retests,
            "fib_lo": a.fib_lo, "fib_hi": a.fib_hi, "breakers": not a.no_breakers, "ob_zone": a.ob_zone,
            "entry_tol": max(0.0, min(50.0, a.entry_tol)), "rr_at_limit": a.rr_at_limit,
-           "range_struct": max(0.0, a.range_struct), "eq_levels": max(0.0, a.eq_levels), "eq_dist": max(0.0, a.eq_dist)}
+           "approach_atr": max(0.0, a.approach_atr), "range_struct": max(0.0, a.range_struct), "eq_levels": max(0.0, a.eq_levels), "eq_dist": max(0.0, a.eq_dist)}
     LOG_OPTS["eq"] = cfg["eq_levels"] > 0
     if a.debug:
         cfg["stats"] = {}

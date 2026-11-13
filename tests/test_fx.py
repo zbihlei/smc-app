@@ -64,6 +64,22 @@ try:
     check("немає файла свічок → зрозуміла помилка", False)
 except FX.FxError as e:
     check("немає файла свічок → зрозуміла помилка", "NZDCAD" in str(e))
+# v1.9.3: status.json свіжий, а файли свічок старі (MT5 щойно запустили) — скан не має йти по старих свічках
+import fx_source as _FS  # noqa: E402
+_d = fake_mt5.write(tempfile.mkdtemp(), ["EURUSD", "GBPUSD"])
+_old = time.time() - 3 * 86400
+os.utime(os.path.join(_d, "GBPUSD_H4.csv"), (_old, _old))
+_src = _FS.Source(_d, "EURUSD,GBPUSD")
+_st = dict(_src.status(check_fresh=True), market_open=True)
+try:
+    _src.check_candles(_st, ["EURUSD", "GBPUSD"])
+    _msg = ""
+except _FS.FxError as e:
+    _msg = str(e)
+check("свічки 3-денної давнини при свіжому status.json → помилка скану «MT5 ще не оновив свічки»", "MT5 ще не оновив свічки (GBPUSD: файл 7" in _msg, _msg)
+_src.check_candles(_st, ["EURUSD"])
+check("свіжі свічки → без помилки; у вихідні перевірка не заважає", _src.check_candles(dict(_st, market_open=False), ["GBPUSD"]) is None)
+
 stale = fake_mt5.write(tempfile.mkdtemp(), ["EURUSD"], status_age=600)
 try:
     FX.Source(stale).status(check_fresh=True)
@@ -118,7 +134,7 @@ data_dir = tempfile.mkdtemp(prefix="smcfx_")
 res = tempfile.mkdtemp(prefix="smcfx_res_")
 with open(os.path.join(data_dir, "settings.json"), "w") as f:
     json.dump({"screener_path": os.path.join(APP, "smc_screener.py"), "results_dir": res, "caffeinate": False,
-               "popup": False, "voice": False, "tv_button": False, "approach": 10, "extra_args": "--min-rr 1"}, f)
+               "popup": False, "voice": False, "tv_button": False, "approach": 10, "approach_atr": 0, "extra_args": "--min-rr 1"}, f)
 app = subprocess.Popen([sys.executable, os.path.join(APP, "app.py"), "--port", str(PORT), "--no-browser"],
                        env=dict(os.environ, SMC_APP_DATA=data_dir, SMC_LTF_INTERVAL="1", HOME=home),
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

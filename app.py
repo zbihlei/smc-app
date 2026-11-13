@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.9.2"
+APP_VERSION = "1.9.3"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -58,6 +58,7 @@ DEFAULTS = {
     "results_dir": "~/Desktop/results",
     "watch": 30,
     "approach": 4,
+    "approach_atr": 3,
     "top": 100,
     "fx_enabled": False,          # форекс-скринер (дані з MT5 через робота SMC_Bridge)
     "fx_pairs": fx_source.DEFAULT_PAIRS,
@@ -86,7 +87,7 @@ DEFAULTS = {
 # межі для числових полів: (мін, макс, тип)
 LIMITS = {
     "watch": (1, 240, float), "approach": (0.1, 50, float), "top": (1, 500, int), "min_volume": (1, 1000, float),
-    "price_check": (0, 600, float), "min_stop_atr": (0, 5, float), "entry_tol": (0, 50, float),
+    "price_check": (0, 600, float), "min_stop_atr": (0, 5, float), "entry_tol": (0, 50, float), "approach_atr": (0, 50, float),
 }
 TRENDS = ("strict", "flag", "bos")
 FLAGS = ("popup", "voice", "tv_button", "stop_wick", "caffeinate", "sheet_sync", "tg_enabled", "git_autopush", "breakers", "spot_auto", "ltf_enabled", "fx_enabled")
@@ -193,6 +194,8 @@ def build_command(s):
         cmd.append("--no-breakers")
     if float(s.get("entry_tol") or 0) > 0:
         cmd += ["--entry-tol", num(float(s["entry_tol"]))]
+    if float(s.get("approach_atr") or 0) > 0:
+        cmd += ["--approach-atr", num(float(s["approach_atr"]))]
     cmd += shlex.split(s["extra_args"])
     caff = shutil.which("caffeinate") if s["caffeinate"] else None
     if caff:
@@ -1172,6 +1175,29 @@ LTF = ltf.LtfWatcher(DATA_DIR, ltf_rows, lambda t, x: notify_mac(t, x),
                      interval=float(os.environ.get("SMC_LTF_INTERVAL") or 60))
 
 
+def fx_export_history(s):
+    """Копія свічок MT5 (H4 і H1 усіх пар + status.json) у data/fx_history — для бектесту на форексі.
+    Скільки свічок у файлах, вирішує параметр робота InpBars у MT5."""
+    import shutil
+    src = fx_src(s)
+    st = src.status()
+    out = os.path.join(DATA_DIR, "fx_history")
+    os.makedirs(out, exist_ok=True)
+    n, bars = 0, {}
+    for name in sorted(os.listdir(st["dir"])):
+        if name == "status.json" or name.endswith(("_H4.csv", "_H1.csv")):
+            shutil.copyfile(os.path.join(st["dir"], name), os.path.join(out, name))
+            if name.endswith(".csv"):
+                n += 1
+                with open(os.path.join(out, name), encoding="utf-8-sig") as f:
+                    k = sum(1 for _ in f)
+                tf = name[-6:-4]
+                bars[tf] = min(bars.get(tf, k), k)
+    if not n:
+        raise fx_source.FxError("у папці робота немає файлів свічок")
+    return {"files": n, "bars": bars, "dir": out, "offset_s": st.get("offset_s"), "at": dt.datetime.now().strftime("%H:%M")}
+
+
 def fx_src(s=None):
     s = s or load_settings()
     return fx_source.Source(s.get("fx_dir") or "", s.get("fx_pairs") or fx_source.DEFAULT_PAIRS)
@@ -1680,6 +1706,11 @@ class Handler(BaseHTTPRequestHandler):
             apply_fx(new)
             run = SCREENER.status()["running"]
             return self._send(200, {"ok": True, "chat": str(chat), "name": name, "bot": bot, "screener_running": run})
+        if u.path == "/api/fx/export_history":
+            try:
+                return self._send(200, dict(fx_export_history(s), ok=True))
+            except Exception as e:
+                return self._send(400, {"ok": False, "error": str(e)})
         if u.path == "/api/telegram/test":
             chat = tg_chat(s)
             if not chat:

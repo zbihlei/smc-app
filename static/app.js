@@ -641,6 +641,15 @@ async function loadSettings() {
   loadGit();
   loadFx();
 }
+document.addEventListener("click", async e => {
+  if (!e.target.closest || !e.target.closest("#btnFxExport")) return;
+  const m = $("#fxExportMsg");
+  m.textContent = "копіюю…";
+  try {
+    const r = await api("/api/fx/export_history", { method: "POST" });
+    m.textContent = r.ok ? `збережено ${r.files} файлів о ${r.at}: 4h — ${r.bars.H4 || 0} свічок, 1h — ${r.bars.H1 || 0}` : (r.error || "не вдалося");
+  } catch (err) { m.textContent = String(err.message || err); }
+});
 async function loadFx() {
   const box = $("#fxState");
   if (!box) return;
