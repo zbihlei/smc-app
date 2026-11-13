@@ -171,6 +171,8 @@ async function pollStatus() {
     const was = S.running;
     S.status = st;
     S.running = !!st.running;
+    const ft = $("#appFoot"), ver = st.env && st.env.app_version;
+    if (ft && ver) ft.textContent = "SMC App v" + ver;
     if (st.last_exit && !st.running && !pollStatus.exitShown) {
       pollStatus.exitShown = true;
       showMsg(`Скринер завершився сам о ${st.last_exit.at} (код ${st.last_exit.code}). Причина — у лозі внизу.`, true);

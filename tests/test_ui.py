@@ -97,6 +97,11 @@ try:
         scores = pg.eval_on_selector_all("#tiles .tile", "els => els.map(e => e.classList.contains('hot'))")
         check("за замовчуванням — блоки (6 шт.), таблиця прихована", n_t == 6 and pg.locator("#tblWrap").is_hidden())
         sc = pg.eval_on_selector_all("#tiles .tile .t-ft .sc", "els => els.map(e => [e.textContent, e.classList.contains('pos'), e.classList.contains('neg')])")
+        col = pg.eval_on_selector_all("#tiles .tile .t-ft .sc", "els => els.map(e => [e.className, getComputedStyle(e).color])")
+        check("бали справді пофарбовані (зелений rgb(8, 153, 129) / червоний rgb(211, 47, 47)), а не лише мають клас", all(
+            (c == "rgb(8, 153, 129)") if "pos" in k else (c == "rgb(211, 47, 47)") if "neg" in k else True for k, c in col)
+            and any("pos" in k or "neg" in k for k, _ in col), col)
+        check("версія додатка в підвалі сторінки", pg.locator("#appFoot").inner_text().startswith("SMC App v1."), pg.locator("#appFoot").inner_text())
         check("бали кольором: плюс — зелений зі знаком «+», мінус — червоний, нуль — без кольору", len(sc) == n_t and all(
             (p and t.startswith("+") and not n) if float(t.replace("−", "-")) > 0 else (n and t.startswith("−") and not p) if float(t.replace("−", "-")) < 0
             else (not p and not n) for t, p, n in sc), sc)

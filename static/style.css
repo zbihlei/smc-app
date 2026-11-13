@@ -591,3 +591,8 @@ tr.hot td:first-child { box-shadow: inset 4px 0 0 #f0a500; }
 
 /* v1.8.3 — перемикач спливаючих вікон */
 #btnPopup.off { color: var(--muted); background: #f3f4f6; }
+
+/* v1.9.2: бали кольором (сильніше за «.tile .t-ft b») і версія в підвалі */
+b.sc.pos, .tile .t-ft b.sc.pos { color: var(--green); }
+b.sc.neg, .tile .t-ft b.sc.neg { color: var(--red); }
+.appfoot { text-align: center; color: var(--muted); font-size: 12px; padding: 14px 0 18px; }
