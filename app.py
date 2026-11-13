@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.9.4"
+APP_VERSION = "1.9.5"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -1823,6 +1823,11 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/strategy":
             code, res = strategy_save(body.get("text"), body.get("base_mtime"))
             return self._send(code, res)
+        if u.path == "/api/restart":
+            # перезапустити сам додаток (той самий процес через exec — ярлик і дозволи macOS лишаються); скринери не чіпаємо
+            RESTART["on"] = True
+            threading.Timer(0.3, SERVER.shutdown).start()
+            return self._send(200, {"ok": True})
         if u.path == "/api/shutdown":
             # закрити сам додаток (сервер); скринер, якщо працює, НЕ зупиняється
             threading.Timer(0.3, SERVER.shutdown).start()
@@ -1853,6 +1858,9 @@ class Handler(BaseHTTPRequestHandler):
             ctype += "; charset=utf-8"
         with open(full, "rb") as f:
             self._send(200, f.read(), ctype)
+
+
+RESTART = {"on": False}
 
 
 def main():
@@ -1896,6 +1904,9 @@ def main():
         pass
     finally:
         srv.server_close()
+        if RESTART["on"]:
+            print("Перезапуск додатка…", flush=True)
+            os.execv(sys.executable, [sys.executable, os.path.abspath(__file__), "--port", str(a.port), "--no-browser"])
         if SCREENER.status()["running"] or FX.status()["running"]:
             print("\nДодаток закрито. Скринер ПРОДОВЖУЄ працювати у фоні; зупинити: знову відкрий додаток → «Стоп».")
         else:

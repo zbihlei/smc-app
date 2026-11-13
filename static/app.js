@@ -766,6 +766,26 @@ $("#btnShutdown").addEventListener("click", async () => {
     (або <code>python3 app.py</code> у папці додатка). Це вікно можна закрити.</p></div>`;
 });
 
+// ---------------------------------------------------------------- перезапустити додаток (сервер + сторінка)
+$("#btnRestart").addEventListener("click", async () => {
+  if (!confirm("Перезапустити додаток? Скринери, якщо працюють, продовжать працювати.")) return;
+  try { await api("/api/restart", {}); } catch (e) { /* сервер міг закритись раніше, ніж відповів */ }
+  document.body.innerHTML = '<div class="closed"><h2>Перезапускаю SMC App…</h2><p>Сторінка відкриється сама за кілька секунд.</p></div>';
+  const t0 = Date.now();
+  const tick = async () => {
+    try {
+      const r = await fetch("/api/status", { cache: "no-store" });
+      if (r.ok && Date.now() - t0 > 1500) return location.replace("/?r=" + Date.now());
+    } catch (e) { /* ще не піднявся */ }
+    if (Date.now() - t0 > 60000) {
+      document.body.innerHTML = '<div class="closed"><h2>Додаток не відповів</h2><p>Відкрий «SMC App» з Dock ще раз.</p></div>';
+      return;
+    }
+    setTimeout(tick, 500);
+  };
+  setTimeout(tick, 1200);
+});
+
 // ---------------------------------------------------------------- GitHub
 const gitTime = iso => iso ? iso.replace("T", " ").slice(0, 16) : "";
 async function loadGit() {
