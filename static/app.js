@@ -644,10 +644,11 @@ async function loadSettings() {
 document.addEventListener("click", async e => {
   if (!e.target.closest || !e.target.closest("#btnFxExport")) return;
   const m = $("#fxExportMsg");
-  m.textContent = "копіюю…";
+  m.textContent = "копіюю, це може тривати до 3 хв — не закривай сторінку…";
   try {
     const r = await api("/api/fx/export_history", { method: "POST" });
-    m.textContent = r.ok ? `збережено ${r.files} файлів о ${r.at}: 4h — ${r.bars.H4 || 0} свічок, 1h — ${r.bars.H1 || 0}` : (r.error || "не вдалося");
+    m.textContent = r.ok ? `збережено ${r.files} файлів о ${r.at}: 4h — ${r.bars.H4 || 0} свічок, 1h — ${r.bars.H1 || 0}`
+      + (r.short && r.short.length ? ` (коротші за ${r.max_bars}: ${r.short.length} файлів — натисни ще раз)` : "") : (r.error || "не вдалося");
   } catch (err) { m.textContent = String(err.message || err); }
 });
 async function loadFx() {

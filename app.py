@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "1.9.3"
+APP_VERSION = "1.9.4"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -1175,27 +1175,60 @@ LTF = ltf.LtfWatcher(DATA_DIR, ltf_rows, lambda t, x: notify_mac(t, x),
                      interval=float(os.environ.get("SMC_LTF_INTERVAL") or 60))
 
 
-def fx_export_history(s):
+def fx_export_history(s, wait_s=None, step_s=5.0):
     """Копія свічок MT5 (H4 і H1 усіх пар + status.json) у data/fx_history — для бектесту на форексі.
-    Скільки свічок у файлах, вирішує параметр робота InpBars у MT5."""
+    Скільки свічок у файлах, вирішує параметр робота InpBars у MT5. Робот переписує файли по черзі (а якщо в MT5
+    випадково працюють два роботи — ще й навперемін з різною глибиною), тому копіюємо кілька разів протягом
+    wait_s секунд і для кожної пари лишаємо НАЙГЛИБШИЙ варіант (копію, старшу за добу, замінюємо будь-яким)."""
     import shutil
+    wait_s = float(os.environ.get("SMC_FX_EXPORT_WAIT") or 150) if wait_s is None else wait_s
     src = fx_src(s)
-    st = src.status()
     out = os.path.join(DATA_DIR, "fx_history")
     os.makedirs(out, exist_ok=True)
-    n, bars = 0, {}
-    for name in sorted(os.listdir(st["dir"])):
-        if name == "status.json" or name.endswith(("_H4.csv", "_H1.csv")):
-            shutil.copyfile(os.path.join(st["dir"], name), os.path.join(out, name))
-            if name.endswith(".csv"):
-                n += 1
-                with open(os.path.join(out, name), encoding="utf-8-sig") as f:
-                    k = sum(1 for _ in f)
-                tf = name[-6:-4]
-                bars[tf] = min(bars.get(tf, k), k)
-    if not n:
-        raise fx_source.FxError("у папці робота немає файлів свічок")
-    return {"files": n, "bars": bars, "dir": out, "offset_s": st.get("offset_s"), "at": dt.datetime.now().strftime("%H:%M")}
+
+    def lines(p):
+        try:
+            with open(p, "rb") as f:
+                return sum(1 for _ in f)
+        except OSError:
+            return -1
+
+    have, end, st = {}, time.time() + wait_s, None
+    while True:
+        st = src.status()
+        for name in sorted(os.listdir(st["dir"])):
+            if name == "status.json":
+                shutil.copyfile(os.path.join(st["dir"], name), os.path.join(out, name))
+                continue
+            if not name.endswith(("_H4.csv", "_H1.csv")):
+                continue
+            a, b = os.path.join(st["dir"], name), os.path.join(out, name)
+            tmp = b + ".tmp"
+            try:
+                shutil.copyfile(a, tmp)
+            except OSError:
+                continue
+            n_new, n_old = lines(tmp), have.get(name, lines(b))
+            old_stale = os.path.exists(b) and name not in have and time.time() - os.path.getmtime(b) > 86400
+            if n_new >= n_old or old_stale:
+                os.replace(tmp, b)
+                have[name] = n_new
+            else:
+                os.remove(tmp)
+                have[name] = n_old
+        if not have:
+            raise fx_source.FxError("у папці робота немає файлів свічок")
+        top = max(have.values())
+        if time.time() >= end or (top > 600 and min(have.values()) == top):
+            break
+        time.sleep(step_s)
+    bars = {}
+    for name, k in have.items():
+        tf = name[-6:-4]
+        bars[tf] = min(bars.get(tf, k), k)
+    top = max(have.values())
+    return {"files": len(have), "bars": bars, "max_bars": top, "short": sorted(n[:-4] for n, k in have.items() if k < top),
+            "dir": out, "offset_s": st.get("offset_s"), "at": dt.datetime.now().strftime("%H:%M")}
 
 
 def fx_src(s=None):
