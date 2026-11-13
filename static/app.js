@@ -303,7 +303,7 @@ function renderTable() {
       <td class="dir-${esc(r.dir)}">${esc(r.dir)}${r.zone_type === "брейкер" ? ' <span class="tag amber" title="брейкер-блок: пробитий ордерблок протилежного напрямку">брейкер</span>' : ""}</td>
       <td>${esc(r.status)}</td>
       <td class="act${r.rank}">${esc(actionText(r))}</td>
-      <td class="num"><b>${esc(r.score)}</b></td>
+      <td class="num">${scoreHtml(r.score)}</td>
       <td class="num">${fmt(r.price)}</td>
       <td class="num">${fmt(r.zone_low)}–${fmt(r.zone_high)}</td>
       <td class="num">${fmt(r.entry)}</td>
@@ -349,6 +349,13 @@ function renderBtc(rows) {
     + ` Угоди ${down ? "Short" : "Long"} — у бік руху, але після різкого руху можливий відкат.`;
   box.classList.remove("hidden");
 }
+// бали: плюсові зеленим (зі знаком «+»), мінусові червоним, нуль — звичайним кольором
+function scoreHtml(v) {
+  const n = Number(v);
+  if (!isFinite(n) || n === 0) return `<b class="sc">${esc(v)}</b>`;
+  return n > 0 ? `<b class="sc pos">+${esc(v)}</b>` : `<b class="sc neg">${esc(String(v).replace("-", "−"))}</b>`;
+}
+
 function tileHtml(r) {
   const warn = (r.flags || []).length ? `<span class="t-warn" title="${esc((r.flags || []).join("; "))}">⚠ ${(r.flags || []).length}</span>` : "";
   const bt = r.btcFlag ? esc(r.btcFlag.split(" — ")[0].replace("BTC різко ", "")) : "";
@@ -359,7 +366,7 @@ function tileHtml(r) {
       <div class="t-lv"><span>вхід</span><b>${fmt(r.entry)}</b><span>стоп</span><b>${fmt(r.stop)}</b><span>ціль</span><b>${fmt(r.target)}</b></div>
       ${r.btc === "against" ? `<div class="t-btc" title="${esc(r.btcFlag)}">₿ ${bt} · проти угоди</div>` : r.btc === "with" ? `<div class="t-btc with" title="${esc(r.btcFlag)}">₿ ${bt} · у бік угоди</div>` : ""}
       ${r.first_seen ? `<div class="t-when" title="коли сигнал уперше з'явився у списку">з ${esc(seenText(r.first_seen))}</div>` : ""}
-      <div class="t-ft"><b>R:R ${fix(r.rr, 1)}</b><span>бали ${esc(r.score)}</span><span>${r.rank === 0 ? "" : fix(r.dist, 1) + "%"}</span>${warn}</div>
+      <div class="t-ft"><b>R:R ${fix(r.rr, 1)}</b><span>бали ${scoreHtml(r.score)}</span><span>${r.rank === 0 ? "" : fix(r.dist, 1) + "%"}</span>${warn}</div>
     </div>`;
 }
 function renderTiles() {

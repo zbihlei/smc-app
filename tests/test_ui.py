@@ -96,6 +96,10 @@ try:
         n_t = pg.locator("#tiles .tile").count()
         scores = pg.eval_on_selector_all("#tiles .tile", "els => els.map(e => e.classList.contains('hot'))")
         check("за замовчуванням — блоки (6 шт.), таблиця прихована", n_t == 6 and pg.locator("#tblWrap").is_hidden())
+        sc = pg.eval_on_selector_all("#tiles .tile .t-ft .sc", "els => els.map(e => [e.textContent, e.classList.contains('pos'), e.classList.contains('neg')])")
+        check("бали кольором: плюс — зелений зі знаком «+», мінус — червоний, нуль — без кольору", len(sc) == n_t and all(
+            (p and t.startswith("+") and not n) if float(t.replace("−", "-")) > 0 else (n and t.startswith("−") and not p) if float(t.replace("−", "-")) < 0
+            else (not p and not n) for t, p, n in sc), sc)
         check("бали ≥ 2: рамка й ★ (позначка, а не місце у списку)", any(scores) and pg.locator("#tiles .tile.hot .t-hot").count() == sum(scores), scores)
         secs = pg.eval_on_selector_all("#tiles .tsec", "els => els.map(e => [e.dataset.g, e.querySelectorAll('.tile').length, e.querySelectorAll('.tile.s0').length])")
         check("секції: «В зоні» першою (лише блоки в зоні), далі «Нові»; порожніх секцій немає",
