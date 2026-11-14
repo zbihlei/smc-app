@@ -100,7 +100,7 @@ def equity(closed):
         dd = peak - cum
         streak = streak + 1 if t["result"] < 0 else 0
         max_dd, longest = max(max_dd, dd), max(longest, streak)
-        out.append({"n": t["n"], "date": t["date"], "instrument": t["instrument"], "result": t["result"],
+        out.append({"n": t.get("ln", t["n"]), "date": t["date"],   # № у списку журналу "instrument": t["instrument"], "result": t["result"],
                     "cum": round(cum, 2), "dd": round(dd, 2)})
     return out, round(max_dd, 2), longest, streak
 

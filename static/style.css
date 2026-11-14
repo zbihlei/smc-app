@@ -180,6 +180,18 @@ legend { font-weight: 700; padding: 0 6px; }
 }
 
 /* =================== ЖУРНАЛ (етап 2) =================== */
+/* списки журналу: 4 розділи (ринок × режим), поточний список і архів */
+.j-lists { padding: 10px 12px; margin: 12px 0; display: flex; flex-direction: column; gap: 10px; }
+.jsec { flex-wrap: wrap; align-self: flex-start; max-width: 100%; }
+.jl-row, .jl-form { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.jl-lbl { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); max-width: 100%; }
+.jl-lbl select, .jl-form input { font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: #fff;
+  max-width: 100%; min-width: 0; }
+.jl-lbl select { max-width: min(420px, 70vw); }
+.jl-form input { width: 300px; }
+.jl-acts { display: inline-flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.tag.arch { background: #eceef2; color: var(--ink-2); }
+.j-ro { margin: 6px 0 10px; }
 .j-head { display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 10px; }
 .j-stats { display: flex; gap: 10px; flex-wrap: wrap; }
 .stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 14px; min-width: 104px; }

@@ -7,10 +7,23 @@ const sCls = x => x > 0 ? "pos" : x < 0 ? "neg" : "";
 const pct1 = x => (x === null || x === undefined) ? "–" : String(x).replace(".", ",") + "%";
 
 async function loadSummary() {
-  const d = await api("/api/stats?period=" + SS.period);
+  const id = +(store("smc_jlist") || 0);   // вибраний список — спільний із «Журналом»
+  const d = await api("/api/stats?period=" + SS.period + (id ? "&list=" + id : ""));
   SS.data = d;
+  renderListSel();
   renderSummary();
 }
+function renderListSel() {
+  const d = SS.data, cur = d.list ? d.list.id : null;
+  const by = {};
+  (d.lists || []).forEach(l => { (by[l.section] = by[l.section] || []).push(l); });
+  $("#sList").innerHTML = Object.keys(by).map(sec => `<optgroup label="${esc(sec)}">` + by[sec].slice().sort((a, b) => (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1) || b.id - a.id)
+    .map(l => `<option value="${l.id}"${l.id === cur ? " selected" : ""}>${esc(l.name)}${l.status !== "active" ? " (архів)" : ""} · угод ${l.count}</option>`).join("") + "</optgroup>").join("");
+}
+$("#sList").addEventListener("change", e => {
+  store("smc_jlist", e.target.value);
+  loadSummary();
+});
 window.loadSummary = loadSummary;
 
 $("#sPeriod").addEventListener("click", e => {
@@ -28,7 +41,8 @@ function kpi(label, value, sub, cls) {
 
 function renderSummary() {
   const d = SS.data, g = d.general;
-  $("#sNote").textContent = `${d.period_label}` + (g.open ? ` · відкритих угод ${g.open} (не враховано)` : "");
+  $("#sNote").textContent = (d.list ? `${d.list.section} · «${d.list.name}»${d.list.status !== "active" ? " (архів)" : ""} · ` : "")
+    + `${d.period_label}` + (g.open ? ` · відкритих угод ${g.open} (не враховано)` : "");
   if (!g.n) {
     $("#sKpi").innerHTML = "";
     $("#sEq").innerHTML = '<div class="empty">За цей період немає закритих угод.</div>';

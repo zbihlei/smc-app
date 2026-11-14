@@ -126,7 +126,32 @@ CREATE TABLE IF NOT EXISTS trades (
   source TEXT DEFAULT 'app', sheet_status TEXT DEFAULT 'pending', sheet_error TEXT, sheet_synced_at TEXT,
   created_at TEXT, updated_at TEXT
 );
+CREATE TABLE IF NOT EXISTS lists (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,   -- номер видаленого списку не використовується вдруге
+  name TEXT NOT NULL, market TEXT NOT NULL, mode TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active', sheet INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT, archived_at TEXT
+);
 """
+
+# Списки журналу: 4 розділи (ринок × режим). У кожному розділі — щонайбільше один поточний список, решта в архіві.
+MARKETS = {"crypto": "Крипто", "forex": "Форекс"}
+MODES = {"paper": "Пейпер", "live": "Лайв"}
+SECTIONS = [(m, md) for m in MARKETS for md in MODES]
+FIRST_LIST = "Перший список"   # назва списку, куди при оновленні потрапляють угоди, що вже були в журналі
+
+
+def section_label(market, mode):
+    return f"{MARKETS.get(market, market)} · {MODES.get(mode, mode)}"
+
+
+def clean_list_name(name):
+    s = re.sub(r"\s+", " ", str(name or "")).strip()
+    if not s:
+        raise ValueError("впиши назву списку")
+    if len(s) > 60:
+        raise ValueError("назва списку — до 60 символів")
+    return s
 
 
 class Journal:
@@ -135,28 +160,158 @@ class Journal:
         self.path = os.path.join(data_dir, "journal.db")
         self.backup_dir = os.path.join(data_dir, "backup")
         os.makedirs(data_dir, exist_ok=True)
-        with self._con() as con:
-            con.executescript(SCHEMA)
+        self.migrate()
 
     def _con(self):
         con = sqlite3.connect(self.path, timeout=10)
         con.row_factory = sqlite3.Row
         return con
 
-    # ---------------- читання
-    def rows(self):
+    def migrate(self):
+        """Схема бази + перехід на списки (v2.1): угоди без списку потрапляють у «Крипто · Пейпер → Перший список».
+        Перед зміною структури — копія бази в backup/journal_before_lists_….db. Викликається й після відновлення з копії."""
+        with _db_lock:
+            with self._con() as con:
+                con.executescript(SCHEMA)
+                cols = [r[1] for r in con.execute("PRAGMA table_info(trades)")]
+                has_trades = con.execute("SELECT COUNT(*) FROM trades").fetchone()[0] > 0
+            if "list_id" not in cols:
+                if has_trades:
+                    os.makedirs(self.backup_dir, exist_ok=True)
+                    self._copy_db(os.path.join(self.backup_dir, f"journal_before_lists_{dt.datetime.now():%Y-%m-%d_%H%M%S}.db"))
+                with self._con() as con:
+                    con.execute("ALTER TABLE trades ADD COLUMN list_id INTEGER")
+            with self._con() as con:
+                if con.execute("SELECT COUNT(*) FROM trades WHERE list_id IS NULL").fetchone()[0]:
+                    lid = self._active_id(con, "crypto", "paper")
+                    if lid is None:
+                        lid = con.execute("INSERT INTO lists (name, market, mode, status, sheet, created_at) VALUES (?,?,?,?,?,?)",
+                                          (FIRST_LIST, "crypto", "paper", "active", 1, now_iso())).lastrowid
+                    con.execute("UPDATE trades SET list_id=? WHERE list_id IS NULL", (lid,))
+
+    # ---------------- списки
+    @staticmethod
+    def _active_id(con, market, mode):
+        r = con.execute("SELECT id FROM lists WHERE market=? AND mode=? AND status='active' ORDER BY id DESC LIMIT 1",
+                        (market, mode)).fetchone()
+        return r[0] if r else None
+
+    def lists(self):
+        """Усі списки з короткою статистикою (угод, закритих, накопичено, період)."""
         with self._con() as con:
-            return [dict(r) for r in con.execute("SELECT * FROM trades ORDER BY n")]
+            rows = con.execute("""SELECT l.*, COUNT(t.n) AS count, COUNT(t.result) AS closed,
+                                         ROUND(COALESCE(SUM(t.result), 0), 2) AS cum, MIN(t.date) AS first_date, MAX(t.date) AS last_date
+                                  FROM lists l LEFT JOIN trades t ON t.list_id = l.id GROUP BY l.id ORDER BY l.id""").fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["section"] = section_label(d["market"], d["mode"])
+            d["sheet"] = bool(d["sheet"])
+            out.append(d)
+        return out
+
+    def get_list(self, lid):
+        try:
+            lid = int(lid)
+        except (TypeError, ValueError):
+            return None
+        return next((x for x in self.lists() if x["id"] == lid), None)
+
+    def active_list(self, market, mode):
+        with self._con() as con:
+            lid = self._active_id(con, market, mode)
+        return self.get_list(lid) if lid else None
+
+    def _retire(self, con, lid):
+        """Поточний список іде в архів; порожній — просто видаляється (у ньому нічого берегти)."""
+        if con.execute("SELECT COUNT(*) FROM trades WHERE list_id=?", (lid,)).fetchone()[0]:
+            con.execute("UPDATE lists SET status='archived', archived_at=? WHERE id=?", (now_iso(), lid))
+            return "archived"
+        con.execute("DELETE FROM lists WHERE id=?", (lid,))
+        return "deleted"
+
+    def create_list(self, name, market, mode):
+        """Новий поточний список розділу. Попередній поточний — в архів (порожній видаляється)."""
+        name = clean_list_name(name)
+        if market not in MARKETS or mode not in MODES:
+            raise ValueError("невідомий розділ журналу")
+        retired = None
+        with _db_lock, self._con() as con:
+            old = self._active_id(con, market, mode)
+            if old is not None:
+                retired = {"id": old, "name": con.execute("SELECT name FROM lists WHERE id=?", (old,)).fetchone()[0],
+                           "how": self._retire(con, old)}
+            lid = con.execute("INSERT INTO lists (name, market, mode, status, created_at) VALUES (?,?,?,?,?)",
+                              (name, market, mode, "active", now_iso())).lastrowid
+        return lid, retired
+
+    def rename_list(self, lid, name):
+        name = clean_list_name(name)
+        with _db_lock, self._con() as con:
+            if not con.execute("UPDATE lists SET name=? WHERE id=?", (name, int(lid))).rowcount:
+                raise ValueError("списку не знайдено")
+
+    def archive_list(self, lid):
+        """«Завершити» без нового списку. Повертає 'archived' або 'deleted' (порожній)."""
+        with _db_lock, self._con() as con:
+            r = con.execute("SELECT status FROM lists WHERE id=?", (int(lid),)).fetchone()
+            if not r:
+                raise ValueError("списку не знайдено")
+            if r[0] != "active":
+                raise ValueError("список уже в архіві")
+            return self._retire(con, int(lid))
+
+    def unarchive_list(self, lid):
+        """Повернути з архіву: стає поточним; той, що був поточним у розділі, іде в архів (порожній — видаляється)."""
+        with _db_lock, self._con() as con:
+            r = con.execute("SELECT market, mode, status FROM lists WHERE id=?", (int(lid),)).fetchone()
+            if not r:
+                raise ValueError("списку не знайдено")
+            if r[2] == "active":
+                raise ValueError("список і так поточний")
+            retired = None
+            old = self._active_id(con, r[0], r[1])
+            if old is not None:
+                retired = {"id": old, "name": con.execute("SELECT name FROM lists WHERE id=?", (old,)).fetchone()[0],
+                           "how": self._retire(con, old)}
+            con.execute("UPDATE lists SET status='active', archived_at=NULL WHERE id=?", (int(lid),))
+        return retired
+
+    def sheet_list(self):
+        """Список, який дублюється в Google Таблицю (лише один — той, куди потрапили угоди до появи списків)."""
+        with self._con() as con:
+            r = con.execute("SELECT id FROM lists WHERE sheet=1 ORDER BY id LIMIT 1").fetchone()
+            if r:
+                return r[0]
+        with _db_lock, self._con() as con:
+            lid = self._active_id(con, "crypto", "paper")
+            if lid is None:
+                lid = con.execute("INSERT INTO lists (name, market, mode, status, created_at) VALUES (?,?,?,?,?)",
+                                  (FIRST_LIST, "crypto", "paper", "active", now_iso())).lastrowid
+            con.execute("UPDATE lists SET sheet=1 WHERE id=?", (lid,))
+            return lid
+
+    # ---------------- читання
+    def rows(self, list_id=None):
+        with self._con() as con:
+            if list_id is None:
+                return [dict(r) for r in con.execute("SELECT * FROM trades ORDER BY n")]
+            return [dict(r) for r in con.execute("SELECT * FROM trades WHERE list_id=? ORDER BY n", (list_id,))]
 
     def get(self, n):
         with self._con() as con:
             r = con.execute("SELECT * FROM trades WHERE n=?", (n,)).fetchone()
             return dict(r) if r else None
 
-    def list(self):
-        """Угоди з похідними колонками, як у таблиці: R:R план, накопичено, просадка від піку, серія збитків."""
-        out, cum, peak, streak = [], 0.0, 0.0, 0
-        for t in self.rows():
+    def list(self, list_id=None):
+        """Угоди списку з похідними колонками, як у таблиці: № у списку (ln), R:R план, накопичено, просадка від піку,
+        серія збитків. Без list_id — усі угоди (для резервної CSV), тоді похідні рахуються в межах кожного списку."""
+        out, acc = [], {}
+        for t in self.rows(list_id):
+            a = acc.setdefault(t["list_id"], {"ln": 0, "cum": 0.0, "peak": 0.0, "streak": 0})
+            a["ln"] += 1
+            t["ln"] = a["ln"]
+            cum, peak, streak = a["cum"], a["peak"], a["streak"]
             t["rr_plan"] = rr_of(t["entry"], t["stop"], t["target"])
             if t["result"] is None:
                 t["cum"] = t["dd"] = t["streak"] = None
@@ -165,6 +320,7 @@ class Journal:
                 peak = max(peak, cum)
                 streak = streak + 1 if t["result"] < 0 else 0
                 t["cum"], t["dd"], t["streak"] = round(cum, 2), round(peak - cum, 2), streak
+            a.update(cum=cum, peak=peak, streak=streak)
             for k in ("signal_json", "checks_json"):
                 try:
                     t[k[:-5]] = json.loads(t[k]) if t[k] else None
@@ -182,21 +338,33 @@ class Journal:
                 "cum": last["cum"] if last else 0.0, "dd": last["dd"] if last else 0.0,
                 "streak": last["streak"] if last else 0,
                 "winrate": round(len(wins) / len(closed) * 100) if closed else None,
-                "pending_sync": sum(1 for t in trades if t["sheet_status"] != "ok")}
+                "pending_sync": sum(1 for t in trades if t["sheet_status"] not in ("ok", "off"))}
 
     def next_n(self):
         with self._con() as con:
             m = con.execute("SELECT MAX(n) FROM trades").fetchone()[0]
         return (m or 0) + 1
 
+    def last_n(self, list_id):
+        """Внутрішній номер останньої угоди списку (видаляти можна лише її)."""
+        with self._con() as con:
+            return con.execute("SELECT MAX(n) FROM trades WHERE list_id=?", (list_id,)).fetchone()[0]
+
     # ---------------- запис
-    def insert(self, t):
+    def insert(self, t, list_id=None):
+        """Нова угода в список. Внутрішній n — наскрізний (для Google Таблиці: рядок n+2), у списку показується свій №.
+        Без list_id — у список, що дублюється в таблицю (як до появи списків)."""
+        if list_id is None:
+            list_id = self.sheet_list()
         with _db_lock, self._con() as con:
+            sheet = con.execute("SELECT sheet FROM lists WHERE id=?", (list_id,)).fetchone()
+            if sheet is None:
+                raise ValueError("списку не знайдено")
             n = (con.execute("SELECT MAX(n) FROM trades").fetchone()[0] or 0) + 1
-            t = dict(t, n=n, created_at=now_iso(), updated_at=now_iso())
-            cols = ["n"] + SHEET_FIELDS + LOCAL_FIELDS + ["source", "sheet_status", "created_at", "updated_at"]
+            t = dict(t, n=n, list_id=list_id, created_at=now_iso(), updated_at=now_iso())
+            cols = ["n", "list_id"] + SHEET_FIELDS + LOCAL_FIELDS + ["source", "sheet_status", "created_at", "updated_at"]
             t.setdefault("source", "app")
-            t.setdefault("sheet_status", "pending")
+            t.setdefault("sheet_status", "pending" if sheet[0] else "off")
             con.execute(f"INSERT INTO trades ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
                         [t.get(c) for c in cols])
         return n
@@ -204,7 +372,8 @@ class Journal:
     def update(self, n, t):
         cols = [c for c in SHEET_FIELDS + LOCAL_FIELDS if c in t]
         with _db_lock, self._con() as con:
-            con.execute(f"UPDATE trades SET {','.join(c + '=?' for c in cols)}, updated_at=?, sheet_status='pending' WHERE n=?",
+            con.execute(f"UPDATE trades SET {','.join(c + '=?' for c in cols)}, updated_at=?, "
+                        "sheet_status=CASE WHEN sheet_status='off' THEN 'off' ELSE 'pending' END WHERE n=?",
                         [t[c] for c in cols] + [now_iso(), n])
 
     def set_sync(self, n, ok, error=None):
@@ -223,6 +392,7 @@ class Journal:
         added = updated = 0
         problems = []
         sheet_ns = set()
+        lid = self.sheet_list()
         last_sheet_cum = None
         for item in sheet_trades:
             v = list(item.get("values") or []) + [""] * 20
@@ -246,6 +416,9 @@ class Journal:
                 continue
             sheet_ns.add(n)
             existing = self.get(n)
+            if existing and existing["list_id"] != lid:
+                problems.append(f"рядок {row}: №{n} у додатку зайнятий угодою іншого списку — пропущено")
+                continue
             with _db_lock, self._con() as con:
                 if existing:
                     if existing["instrument"].strip().upper() != t["instrument"].upper():
@@ -256,12 +429,12 @@ class Journal:
                     updated += 1
                 else:
                     risk = 0.5 if re.search(r"[Рр]изик\s*0[,.]5\s*R", t["note"] or "") else 1.0
-                    cols = ["n"] + SHEET_FIELDS + ["risk", "source", "sheet_status", "sheet_synced_at", "created_at", "updated_at"]
-                    vals = [n] + [t[c] for c in SHEET_FIELDS] + [risk, "import", "ok", now_iso(), now_iso(), now_iso()]
+                    cols = ["n", "list_id"] + SHEET_FIELDS + ["risk", "source", "sheet_status", "sheet_synced_at", "created_at", "updated_at"]
+                    vals = [n, lid] + [t[c] for c in SHEET_FIELDS] + [risk, "import", "ok", now_iso(), now_iso(), now_iso()]
                     con.execute(f"INSERT INTO trades ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", vals)
                     added += 1
-        local_only = [t["n"] for t in self.rows() if t["n"] not in sheet_ns]
-        s = self.summary()
+        local_only = [t["n"] for t in self.rows(lid) if t["n"] not in sheet_ns]
+        s = self.summary(self.list(lid))
         return {"added": added, "updated": updated, "problems": problems, "local_only": local_only,
                 "sheet_cum": last_sheet_cum, "app_cum": s["cum"],
                 "cum_match": last_sheet_cum is None or abs((last_sheet_cum or 0) - s["cum"]) < 0.011}
@@ -269,15 +442,19 @@ class Journal:
     # ---------------- резервні копії
     CSV_HEAD = ["№", "Дата", "Інструмент", "Напрямок", "Вхід", "Стоп", "Ціль", "R:R план", "За правилами?", "Результат (R)",
                 "Ведення угоди", "Був CHoCH на 1h?", "Нотатка", "Накопичено (R)", "Просадка (R)", "Серія збитків", "Тип зони",
-                "Підтримка 4h поряд", "Макс. пройдений R (MFE)", "По скринеру", "Ризик (R)", "Сигнал скринера", "Таблиця"]
+                "Підтримка 4h поряд", "Макс. пройдений R (MFE)", "По скринеру", "Ризик (R)", "Сигнал скринера", "Таблиця",
+                "Розділ", "Список"]
 
-    def csv_rows(self):
+    def csv_rows(self, list_id=None):
+        """№ — номер у списку; останні колонки — розділ і назва списку."""
+        names = {x["id"]: (x["section"], x["name"]) for x in self.lists()}
         out = []
-        for t in self.list():
+        for t in self.list(list_id):
             d = dt.date.fromisoformat(t["date"]).strftime("%d.%m.%Y") if t["date"] else ""
-            out.append([t["n"], d, t["instrument"], t["dir"], t["entry"], t["stop"], t["target"], t["rr_plan"], t["rules"],
+            out.append([t["ln"], d, t["instrument"], t["dir"], t["entry"], t["stop"], t["target"], t["rr_plan"], t["rules"],
                         t["result"], t["management"], t["choch"], t["note"], t["cum"], t["dd"], t["streak"], t["zone_type"],
-                        t["support4h"], t["mfe"], t["by_screener"], t["risk"], t["signal_id"] or "", t["sheet_status"]])
+                        t["support4h"], t["mfe"], t["by_screener"], t["risk"], t["signal_id"] or "", t["sheet_status"],
+                        *names.get(t["list_id"], ("", ""))])
         return out
 
     def write_csv(self, path):
@@ -410,6 +587,7 @@ class Journal:
             finally:
                 d.close()
                 s.close()
+        self.migrate()   # копія могла бути зроблена до появи списків
         self.backup(extra_dir)
         self._to_extra(extra_dir, [safety])
         return {"restored": name, "safety": safety, **info}
@@ -595,7 +773,7 @@ def find_matches(results_dir, t, limit=3):
 ORDER = {"error": 0, "warn": 1, "info": 2, "ok": 3}
 
 
-def check_trade(t, sig=None, matches=None):
+def check_trade(t, sig=None, matches=None, market="crypto"):
     items = []
     add = lambda level, text: items.append({"level": level, "text": text})
     e, s, tg, d = t.get("entry"), t.get("stop"), t.get("target"), t.get("dir")
@@ -618,7 +796,7 @@ def check_trade(t, sig=None, matches=None):
         reasons.append("R:R < 3")
     else:
         add("ok", f"R:R план {c2(rr)} ≥ 3.")
-    if stop_pct < 1.5:
+    if stop_pct < 1.5 and market != "forex":   # на форексі стопи в % завжди вузькі — підказка не про це
         add("info", f"Стоп {pct(stop_pct)} від входу — вузький (гіпотеза: збитки купчаться на стопах < 1,5%).")
     risk = t.get("risk") or 1.0
     if risk != 1:

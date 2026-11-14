@@ -2,7 +2,7 @@
 "use strict";
 
 const JS = {
-  data: null, sheet: null,
+  data: null, sheet: null, emptySec: null, listForm: null,
   mode: "signal", editN: null, signal: null, signals: [],
   rulesTouched: false, scrTouched: false, dirty: false, checkTimer: null, lastCheck: null, saving: false,
 };
@@ -23,9 +23,13 @@ function jMsg(text, kind) {
 }
 
 // ---------------------------------------------------------------- список угод
+// вибраний список спільний із «Підсумком» (smc_jlist)
+const curListId = () => +(store("smc_jlist") || 0) || null;
 async function loadJournal() {
-  const d = await api("/api/journal");
+  const id = curListId();
+  const d = await api("/api/journal" + (id ? "?list=" + id : ""));
   JS.data = d;
+  if (d.list) store("smc_jlist", String(d.list.id));
   renderJournal();
   if (d.sheet_sync) loadSheetStatus(false);
   if ($("#bkBox").open) loadBackups(); else loadBackupSummary();
@@ -36,6 +40,20 @@ window.loadJournal = loadJournal;
 function renderJournal() {
   const d = JS.data;
   if (!d) return;
+  renderLists();
+  const ro = jReadonly(), empty = !!JS.emptySec;
+  ["#jAddSignal", "#jAddManual"].forEach(x => { $(x).disabled = ro || empty; });
+  const sheetList = !!(d.list && d.list.sheet);
+  $("#jImport").classList.toggle("hidden", !sheetList || empty);
+  $("#jImport2").classList.toggle("hidden", !sheetList);
+  $("#jEmpty p").textContent = d.list && d.list.status === "active" ? "У цьому списку ще немає угод." : "У списку немає угод.";
+  $("#jCsv").href = "/api/journal/export.csv" + (d.list ? "?list=" + d.list.id : "");
+  if (empty) {
+    $("#jStats").innerHTML = "";
+    $("#jTbl").classList.add("hidden");
+    $("#jEmpty").classList.add("hidden");
+    return;
+  }
   const s = d.summary;
   const rcls = x => x > 0 ? "pos" : x < 0 ? "neg" : "";
   $("#jStats").innerHTML = `
@@ -52,7 +70,7 @@ function renderJournal() {
       : `<span class="warnc" title="${esc(t.sheet_error || "ще не записано в таблицю")}">!</span>`;
     const note = t.note || "";
     return `<tr data-n="${t.n}" class="${t.result === null ? "open" : ""}">
-      <td class="num">${t.n}</td><td>${dmy(t.date)}</td><td class="sym">${esc(t.instrument)}</td>
+      <td class="num">${t.ln}</td><td>${dmy(t.date)}</td><td class="sym">${esc(t.instrument)}</td>
       <td class="dir-${esc(t.dir)}">${esc(t.dir)}</td>
       <td class="num">${ua(t.entry)}</td><td class="num">${ua(t.stop)}</td><td class="num">${ua(t.target)}</td>
       <td class="num ${t.rr_plan !== null && t.rr_plan < 3 ? "neg" : ""}">${ua2(t.rr_plan)}</td>
@@ -69,6 +87,135 @@ function renderJournal() {
   renderSheetLine();
 }
 
+// ---------------------------------------------------------------- списки журналу
+const secKey = x => x.market + "|" + x.mode;
+const jReadonly = () => !JS.emptySec && !!(JS.data && JS.data.list && JS.data.list.status !== "active");
+const signR = x => (x > 0 ? "+" : "") + ua2(x) + "R";
+const jlPeriod = l => l.first_date ? (l.first_date === l.last_date ? dmy(l.first_date) : `${dmy(l.first_date)}–${dmy(l.last_date)}`) : "";
+function curSec() {
+  const d = JS.data;
+  return JS.emptySec || (d.list ? secKey(d.list) : null);
+}
+function renderLists() {
+  const d = JS.data, sec = curSec();
+  const lists = d.lists || [];
+  $("#jSec").innerHTML = (d.sections || []).map(x => {
+    const k = secKey(x), act = lists.find(l => secKey(l) === k && l.status === "active");
+    return `<button type="button" class="chip${k === sec ? " on" : ""}" data-sec="${k}" role="tab" aria-selected="${k === sec}">${esc(x.label)}${act ? `<span>${act.count}</span>` : ""}</button>`;
+  }).join("");
+  const inSec = lists.filter(l => secKey(l) === sec);
+  const active = inSec.find(l => l.status === "active");
+  const arch = inSec.filter(l => l.status !== "active").reverse();
+  const label = (d.sections || []).find(x => secKey(x) === sec);
+  const secName = label ? label.label : "";
+  if (JS.emptySec || !inSec.length) {
+    $("#jListRow").classList.add("hidden");
+    openListForm("first", secName);
+    return;
+  }
+  $("#jListRow").classList.remove("hidden");
+  const opt = l => `<option value="${l.id}"${d.list && l.id === d.list.id ? " selected" : ""}>${esc(l.name)} · угод ${l.count}${l.count ? " · " + signR(l.cum) : ""}${l.status !== "active" && jlPeriod(l) ? " · " + jlPeriod(l) : ""}</option>`;
+  $("#jListSel").innerHTML = (active ? `<optgroup label="Поточний">${opt(active)}</optgroup>` : "")
+    + (arch.length ? `<optgroup label="Архів (${arch.length})">${arch.map(opt).join("")}</optgroup>` : "");
+  const ro = jReadonly();
+  $("#jListTag").innerHTML = ro ? `<span class="tag arch" title="Завершено ${esc(dmy((d.list.archived_at || "").slice(0, 10)))}">архів · лише перегляд</span>`
+    : '<span class="tag green">поточний</span>';
+  $("#jRename").classList.toggle("hidden", false);
+  $("#jFinish").classList.toggle("hidden", ro);
+  $("#jUnarchive").classList.toggle("hidden", !ro);
+  $("#jNewList").textContent = active ? "Завершити й почати новий" : "Почати новий список";
+  $("#jNewList").classList.toggle("hidden", ro && !!active);
+  if (JS.listForm === "first") closeListForm();
+}
+function openListForm(mode, secName) {
+  const d = JS.data, l = d.list;
+  JS.listForm = mode;
+  $("#jListForm").classList.remove("hidden");
+  $("#jListCancel").classList.toggle("hidden", mode === "first");
+  const inp = $("#jListName");
+  if (mode === "rename") {
+    $("#jFormLbl").textContent = "Нова назва списку:";
+    $("#jListOk").textContent = "Зберегти";
+    inp.value = l ? l.name : "";
+  } else {
+    $("#jFormLbl").innerHTML = mode === "first" ? `У розділі <b>${esc(secName)}</b> ще немає списку. Назва першого:` : "Назва нового списку:";
+    $("#jListOk").textContent = "Почати список";
+    if (mode !== "first" || !inp.value) inp.value = "";
+  }
+  if (mode !== "first") setTimeout(() => inp.focus(), 30);
+}
+function closeListForm() {
+  JS.listForm = null;
+  $("#jListForm").classList.add("hidden");
+}
+async function listAction(body, okText) {
+  const r = await api("/api/journal/lists", body);
+  if (!r.ok) { jMsg("Не вдалося: " + esc(r.error || r.message), "err"); return null; }
+  let t = okText;
+  const ret = r.retired;
+  if (ret) t += ret.how === "deleted" ? ` Порожній список «${esc(ret.name)}» видалено.` : ` Список «${esc(ret.name)}» перенесено в архів.`;
+  if (r.backup_error) t += ` <b class="warnc">Резервна копія: ${esc(r.backup_error)}</b>`;
+  jMsg(t, r.backup_error ? "warn" : "ok");
+  return r;
+}
+$("#jSec").addEventListener("click", e => {
+  const b = e.target.closest("[data-sec]");
+  if (!b || b.dataset.sec === curSec()) return;
+  const k = b.dataset.sec, lists = (JS.data.lists || []).filter(l => secKey(l) === k);
+  const pick = lists.find(l => l.status === "active") || lists[lists.length - 1];
+  closeListForm();
+  if (pick) { JS.emptySec = null; store("smc_jlist", String(pick.id)); loadJournal(); }
+  else { JS.emptySec = k; $("#jListName").value = ""; renderJournal(); }
+});
+$("#jListSel").addEventListener("change", e => {
+  JS.emptySec = null; closeListForm();
+  store("smc_jlist", e.target.value);
+  loadJournal();
+});
+$("#jRename").addEventListener("click", () => openListForm("rename"));
+$("#jNewList").addEventListener("click", () => openListForm("new"));
+$("#jListCancel").addEventListener("click", closeListForm);
+$("#jFinish").addEventListener("click", async () => {
+  const l = JS.data.list;
+  if (!l) return;
+  const q = l.count ? `Завершити список «${l.name}» (угод: ${l.count})?\n\nВін піде в архів: угоди лишаться для перегляду в журналі й «Підсумку», змінювати їх не можна. Повернути список можна будь-коли.`
+    : `Список «${l.name}» порожній — його буде видалено. Продовжити?`;
+  if (!confirm(q)) return;
+  const r = await listAction({ action: "archive", id: l.id }, "");
+  if (!r) return;
+  jMsg(r.how === "deleted" ? `Порожній список «${esc(l.name)}» видалено.` : `Список «${esc(l.name)}» завершено й перенесено в архів.`, "ok");
+  if (r.how === "deleted") { JS.emptySec = secKey(l); store("smc_jlist", ""); }
+  loadJournal();
+});
+$("#jUnarchive").addEventListener("click", async () => {
+  const l = JS.data.list;
+  const act = (JS.data.lists || []).find(x => secKey(x) === secKey(l) && x.status === "active");
+  const q = `Повернути список «${l.name}» з архіву? Він знову стане поточним у розділі ${l.section}.`
+    + (act ? `\n\nПоточний список «${act.name}» ${act.count ? "піде в архів" : "порожній — його буде видалено"}.` : "");
+  if (!confirm(q)) return;
+  if (await listAction({ action: "unarchive", id: l.id }, `Список «${esc(l.name)}» знову поточний.`)) loadJournal();
+});
+$("#jListForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const name = $("#jListName").value.trim(), mode = JS.listForm;
+  if (!name) { $("#jListName").focus(); return; }
+  const d = JS.data;
+  if (mode === "rename") {
+    if (await listAction({ action: "rename", id: d.list.id, name }, `Список перейменовано: «${esc(name)}».`)) { closeListForm(); loadJournal(); }
+    return;
+  }
+  const [market, md] = curSec().split("|");
+  const act = (d.lists || []).find(x => x.market === market && x.mode === md && x.status === "active");
+  if (act && !confirm(`Почати новий список «${name}»?\n\n` + (act.count
+      ? `Поточний «${act.name}» (угод: ${act.count}) буде завершено й перенесено в архів — угоди лишаться для перегляду, список можна повернути.`
+      : `Поточний «${act.name}» порожній — його буде видалено.`))) return;
+  const r = await listAction({ action: "create", name, market, mode: md }, `Почато новий список «${esc(name)}».`);
+  if (!r) return;
+  JS.emptySec = null; closeListForm(); $("#jListName").value = "";
+  store("smc_jlist", String(r.id));
+  loadJournal();
+});
+
 $("#jBody").addEventListener("click", e => {
   const tr = e.target.closest("tr[data-n]");
   if (tr) openDrawer("edit", +tr.dataset.n);
@@ -82,6 +229,12 @@ async function loadSheetStatus(force) {
 }
 function renderSheetLine() {
   const st = JS.sheet, el = $("#jSheet");
+  if (JS.data && JS.data.sheet_sync && JS.data.list && !JS.data.list.sheet) {
+    el.innerHTML = '<span class="ok">✓</span> Список зберігається в додатку, з резервними копіями. У Google Таблицю пишеться лише список, '
+      + 'що був до появи списків.';
+    el.className = "sheetline";
+    return;
+  }
   if (JS.data && !JS.data.sheet_sync) {
     el.innerHTML = '<span class="ok">✓</span> Журнал зберігається в додатку, з резервними копіями (див. унизу). '
       + 'Запис у Google Таблицю вимкнено в «Налаштуваннях».';
@@ -167,19 +320,23 @@ function openDrawer(mode, n) {
     if (!t) return;
     JS.editN = n;
     JS.rulesTouched = true; JS.scrTouched = true;  // у збереженій угоді нічого не підміняємо автоматично
-    $("#dTitle").textContent = `Угода №${n} · ${t.instrument} ${t.dir}`;
+    $("#dTitle").textContent = `Угода №${t.ln} · ${t.instrument} ${t.dir}` + (jReadonly() ? " · архів, лише перегляд" : "");
     ["date", "instrument", "dir", "management", "rules", "zone_type", "choch", "support4h", "by_screener", "note"].forEach(k => setField(k, t[k]));
     ["entry", "stop", "target", "result", "mfe"].forEach(k => setField(k, t[k] === null ? "" : ua(t[k])));
     setField("risk", t.risk === 0.5 ? "0.5" : "1");
     JS.signal = t.signal || null;
-    $("#dDelete").hidden = n !== JS.data.next_n - 1;
+    const last = JS.data.trades[JS.data.trades.length - 1];
+    $("#dDelete").hidden = jReadonly() || !last || n !== last.n;
     $("#sigBox").classList.toggle("hidden", !JS.signal);
     $("#sigList").classList.add("hidden");
     $(".sig-tools").classList.add("hidden");
     renderChosen();
     $("#dSave").textContent = "Зберегти зміни";
+    $("#dSave").hidden = jReadonly();
   } else {
-    $("#dTitle").textContent = mode === "signal" ? `Нова угода №${JS.data.next_n} зі скринера` : `Нова угода №${JS.data.next_n} вручну`;
+    $("#dSave").hidden = false;
+    const ln = `«${JS.data.list.name}» (${JS.data.list.section})`;
+    $("#dTitle").textContent = mode === "signal" ? `Нова угода №${JS.data.next_n} зі скринера · ${ln}` : `Нова угода №${JS.data.next_n} вручну · ${ln}`;
     setField("date", todayIso());
     setField("risk", "1");
     $("#sigBox").classList.toggle("hidden", mode !== "signal");
@@ -209,7 +366,8 @@ document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("#drawe
 async function loadSignals() {
   const days = $("#sigDays").value, rej = $("#sigRejected").checked ? 1 : 0;
   $("#sigList").innerHTML = '<div class="muted pad">Завантажую сигнали з логу…</div>';
-  const r = await api(`/api/journal/signals?days=${days}&rejected=${rej}`);
+  const lid = JS.data && JS.data.list ? JS.data.list.id : "";
+  const r = await api(`/api/journal/signals?days=${days}&rejected=${rej}&list=${lid}`);
   JS.signals = r.signals || [];
   JS.signalsPath = r.path;
   JS.signalsExists = r.exists;
@@ -320,7 +478,7 @@ async function runCheck() {
   const e = numIn(t.entry), s = numIn(t.stop), g = numIn(t.target);
   $("#rrOut").textContent = (e && s && g && e !== s) ? ua2(Math.abs(g - e) / Math.abs(e - s)) : "–";
   const seq = (JS.checkSeq = (JS.checkSeq || 0) + 1);
-  const r = await api("/api/journal/check", { trade: t });
+  const r = await api("/api/journal/check", { trade: t, list_id: JS.data && JS.data.list ? JS.data.list.id : null });
   if (seq !== JS.checkSeq) return;  // поки чекали, поля вже змінились — ця відповідь застаріла
   JS.lastCheck = r;
   const icon = { error: "✗", warn: "!", info: "i", ok: "✓" };
@@ -354,7 +512,7 @@ $("#dSave").addEventListener("click", async () => {
   JS.saving = true;
   const btn = $("#dSave"), label = btn.textContent;
   btn.disabled = true; btn.textContent = "Зберігаю…";
-  const body = { trade: t };
+  const body = { trade: t, list_id: JS.data.list ? JS.data.list.id : null };
   if (JS.editN) body.n = JS.editN;
   const r = await api("/api/journal/save", body);
   JS.saving = false; btn.disabled = false; btn.textContent = label;
@@ -364,7 +522,7 @@ $("#dSave").addEventListener("click", async () => {
     return;
   }
   closeDrawer(true);
-  const what = JS.editN ? `Угоду №${r.n} оновлено` : `Угоду №${r.n} збережено`;
+  const what = JS.editN ? `Угоду №${r.ln} оновлено` : `Угоду №${r.ln} збережено`;
   if (r.sync.disabled) jMsg(`${what} ✓` + (r.backup_error ? ` <b class="warnc">Резервна копія: ${esc(r.backup_error)}</b>` : ""), r.backup_error ? "warn" : "ok");
   else if (r.sync.ok) jMsg(`${what} і записано в Google Таблицю ✓`, "ok");
   else if (!r.sync.configured) jMsg(`${what} у додатку. ${esc(r.sync.error)}.`, "warn");
@@ -376,12 +534,12 @@ $("#dDelete").addEventListener("click", async () => {
   const t = JS.data.trades.find(x => x.n === JS.editN);
   if (!t) return;
   const sheetNote = JS.data.sheet_sync ? "\nРядок у Google Таблиці теж буде очищено (формули лишаться)." : "\nПеред видаленням стан збережено в резервній копії.";
-  if (!confirm(`Видалити угоду №${t.n} (${t.instrument} ${t.dir})?${sheetNote}`)) return;
+  if (!confirm(`Видалити угоду №${t.ln} (${t.instrument} ${t.dir})?${sheetNote}`)) return;
   let r = await api("/api/journal/delete", { n: t.n });
   if (!r.ok && r.can_local && confirm(`${r.error}\n\nВидалити лише в додатку?`)) r = await api("/api/journal/delete", { n: t.n, local_only: true });
   if (!r.ok) { $("#dErr").textContent = r.error || "Не вдалося видалити"; $("#dErr").classList.remove("hidden"); return; }
   closeDrawer(true);
-  jMsg(`Угоду №${t.n} видалено.`, "ok");
+  jMsg(`Угоду №${t.ln} видалено.`, "ok");
   loadJournal();
 });
 
@@ -502,7 +660,7 @@ function renderLinks() {
       <button type="button" class="btn small" data-lclear>Очистити список</button>
       <button type="button" class="x" data-lclose>×</button></div>`
     + JS.links.map(t => `<div class="lnk-item">
-      <div class="lnk-tr"><b>№${t.n}</b> ${dmy(t.date)} · <b>${esc(t.instrument)}</b> <span class="dir-${esc(t.dir)}">${esc(t.dir)}</span>
+      <div class="lnk-tr"><span class="muted">${esc(t.section)} · «${esc(t.list_name)}»</span> <b>№${t.ln}</b> ${dmy(t.date)} · <b>${esc(t.instrument)}</b> <span class="dir-${esc(t.dir)}">${esc(t.dir)}</span>
         · вхід ${ua(t.entry)} / стоп ${ua(t.stop)} / ціль ${ua(t.target)}
         · ${t.result === null ? "відкрита" : (t.result > 0 ? "+" : "") + ua2(t.result) + "R"}
         · «По скринеру»: ${esc(t.by_screener || "–")}</div>
@@ -537,7 +695,8 @@ $("#lnkBox").addEventListener("click", async e => {
   if (b.dataset.scr) body.by_screener = b.dataset.scr;
   const r = await api("/api/journal/link", body);
   if (!r.ok) { jMsg("Не вдалося: " + esc(r.error || r.message), "err"); b.disabled = false; return; }
-  jMsg(body.dismiss ? `№${n}: позначено «не той сигнал», більше не пропоную.` :
-    `№${n}: сигнал ${esc(r.signal.symbol)} прив'язано` + (body.by_screener ? ", «По скринеру» = так" : "") + " ✓", "ok");
+  const lt = (JS.links || []).find(x => x.n === n), nm = lt ? `«${esc(lt.list_name)}» №${lt.ln}` : "Угода";
+  jMsg(body.dismiss ? `${nm}: позначено «не той сигнал», більше не пропоную.` :
+    `${nm}: сигнал ${esc(r.signal.symbol)} прив'язано` + (body.by_screener ? ", «По скринеру» = так" : "") + " ✓", "ok");
   await loadJournal();
 });

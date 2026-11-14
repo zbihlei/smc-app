@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.1.0"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -1338,6 +1338,48 @@ def extra_dir():
     return load_settings().get("backup_extra_dir") or None
 
 
+def j_list(raw=None):
+    """Список журналу з запиту (?list=ID / body.list_id); без нього чи невідомий — перший поточний (або останній)."""
+    lst = JOURNAL.get_list(raw) if raw not in (None, "") else None
+    if lst:
+        return lst
+    ls = JOURNAL.lists()
+    order = {sec: i for i, sec in enumerate(journal.SECTIONS)}
+    active = sorted((x for x in ls if x["status"] == "active"), key=lambda x: order.get((x["market"], x["mode"]), 9))
+    return active[0] if active else (ls[-1] if ls else None)
+
+
+def list_rd(s, lst):
+    """Папка логу сигналів для списку: форекс — results/forex, крипто — results."""
+    return fx_results_dir(s) if lst and lst["market"] == "forex" else results_dir(s)
+
+
+def list_closed(lst):
+    return f"список «{lst['name']}» в архіві — угоди там лише для перегляду (поверни його з архіву, щоб змінювати)"
+
+
+def journal_lists(body):
+    """Дії зі списками: create (name, market, mode) / rename (id, name) / archive (id) / unarchive (id)."""
+    act = body.get("action")
+    try:
+        if act == "create":
+            lid, retired = JOURNAL.create_list(body.get("name"), body.get("market"), body.get("mode"))
+            res = {"ok": True, "id": lid, "retired": retired}
+        elif act == "rename":
+            JOURNAL.rename_list(body.get("id"), body.get("name"))
+            res = {"ok": True, "id": int(body.get("id"))}
+        elif act == "archive":
+            res = {"ok": True, "id": int(body.get("id")), "how": JOURNAL.archive_list(body.get("id"))}
+        elif act == "unarchive":
+            res = {"ok": True, "id": int(body.get("id")), "retired": JOURNAL.unarchive_list(body.get("id"))}
+        else:
+            return 400, {"ok": False, "error": "невідома дія"}
+    except (ValueError, TypeError) as e:
+        return 400, {"ok": False, "error": str(e)}
+    res["backup_error"] = JOURNAL.backup(extra_dir())
+    return 200, res
+
+
 def sync_pending(overwrite_n=None):
     """Дописує в Google Таблицю всі угоди, які ще не там (по порядку номерів, щоб не було пропусків)."""
     if not load_settings().get("sheet_sync"):
@@ -1349,7 +1391,7 @@ def sync_pending(overwrite_n=None):
     synced = []
     with SYNC_LOCK:
         for t in JOURNAL.rows():
-            if t["sheet_status"] == "ok":
+            if t["sheet_status"] in ("ok", "off"):   # «off» — угоди списків, що в таблицю не пишуться
                 continue
             overwrite = t["n"] == overwrite_n or t["source"] == "import" or bool(t["sheet_synced_at"])
             try:
@@ -1363,7 +1405,6 @@ def sync_pending(overwrite_n=None):
 
 
 def journal_save(s, body):
-    rd = results_dir(s)
     n_edit = body.get("n")
     t, errors = journal.normalize(body.get("trade") or {})
     if errors:
@@ -1373,6 +1414,17 @@ def journal_save(s, body):
         existing = JOURNAL.get(int(n_edit))
         if not existing:
             return 404, {"ok": False, "errors": [f"угоду №{n_edit} не знайдено"]}
+    if existing:
+        lst = JOURNAL.get_list(existing["list_id"])
+    elif body.get("list_id") not in (None, ""):
+        lst = JOURNAL.get_list(body.get("list_id"))
+    else:   # старі клієнти без списку: поточний список за замовчуванням (на порожній базі — «Перший список»)
+        lst = j_list() or JOURNAL.get_list(JOURNAL.sheet_list())
+    if not lst:
+        return 400, {"ok": False, "errors": ["спершу почни список у цьому розділі журналу"]}
+    if lst["status"] != "active":
+        return 400, {"ok": False, "errors": [list_closed(lst)]}
+    rd = list_rd(s, lst)
     sig = None
     if t["signal_id"]:
         sig = journal.find_signal(rd, t["signal_id"], t["date"])
@@ -1382,7 +1434,7 @@ def journal_save(s, body):
             return 400, {"ok": False, "errors": ["сигнал не знайдено в signals_log.csv"]}
     t["signal_json"] = json.dumps(sig, ensure_ascii=False) if sig else None
     matches = [] if sig else journal.find_matches(rd, t)
-    chk = journal.check_trade(t, sig, matches)
+    chk = journal.check_trade(t, sig, matches, lst["market"])
     hard = [i["text"] for i in chk["items"] if i["level"] == "error"]
     if hard:
         return 400, {"ok": False, "errors": hard}
@@ -1392,9 +1444,10 @@ def journal_save(s, body):
         n = existing["n"]
         JOURNAL.update(n, t)
     else:
-        n = JOURNAL.insert(t)
+        n = JOURNAL.insert(t, lst["id"])
     sync = sync_pending(overwrite_n=n if existing else None)
-    return 200, {"ok": True, "n": n, "sync": sync, "backup_error": JOURNAL.backup(extra_dir()) or snap_err, "checks": chk}
+    ln = next((x["ln"] for x in JOURNAL.list(lst["id"]) if x["n"] == n), None)
+    return 200, {"ok": True, "n": n, "ln": ln, "list_id": lst["id"], "sync": sync, "backup_error": JOURNAL.backup(extra_dir()) or snap_err, "checks": chk}
 
 
 LINK_DISMISSED = os.path.join(DATA_DIR, "link_dismissed.json")
@@ -1409,19 +1462,24 @@ def _dismissed():
 
 
 def link_suggestions(s):
-    """Угоди без прив'язаного сигналу, для яких у signals_log.csv є схожий сигнал (монета, напрям, вхід біля зони, дати)."""
-    rd = results_dir(s)
+    """Угоди без прив'язаного сигналу, для яких у signals_log.csv є схожий сигнал (монета, напрям, вхід біля зони, дати).
+    Лише поточні (не архівні) списки; для форекс-списків — лог форекс-скринера."""
     dis = _dismissed()
     out, checked = [], 0
-    for t in JOURNAL.rows():
-        if t.get("signal_id"):
+    for lst in JOURNAL.lists():
+        if lst["status"] != "active":
             continue
-        checked += 1
-        ms = [m for m in journal.find_matches(rd, t) if f"{t['n']}|{m['id']}" not in dis]
-        if ms:
-            out.append({"n": t["n"], "date": t["date"], "instrument": t["instrument"], "dir": t["dir"],
-                        "entry": t["entry"], "stop": t["stop"], "target": t["target"], "result": t["result"],
-                        "by_screener": t["by_screener"], "matches": ms})
+        rd = list_rd(s, lst)
+        for t in JOURNAL.list(lst["id"]):
+            if t.get("signal_id"):
+                continue
+            checked += 1
+            ms = [m for m in journal.find_matches(rd, t) if f"{t['n']}|{m['id']}" not in dis]
+            if ms:
+                out.append({"n": t["n"], "ln": t["ln"], "list_id": lst["id"], "list_name": lst["name"],
+                            "section": lst["section"], "date": t["date"], "instrument": t["instrument"], "dir": t["dir"],
+                            "entry": t["entry"], "stop": t["stop"], "target": t["target"], "result": t["result"],
+                            "by_screener": t["by_screener"], "matches": ms})
     return {"suggestions": out, "checked": checked}
 
 
@@ -1443,16 +1501,19 @@ def journal_link(s, body):
     t = JOURNAL.get(n)
     if not t:
         return 404, {"ok": False, "error": f"угоди №{n} немає"}
+    lst = JOURNAL.get_list(t["list_id"])
+    if lst and lst["status"] != "active":
+        return 400, {"ok": False, "error": list_closed(lst)}
     if body.get("dismiss"):
         d = _dismissed()
         d.add(f"{n}|{sid}")
         with open(LINK_DISMISSED, "w", encoding="utf-8") as f:
             json.dump(sorted(d), f, ensure_ascii=False)
         return 200, {"ok": True, "dismissed": True}
-    sig = journal.find_signal(results_dir(s), sid, t["date"])
+    sig = journal.find_signal(list_rd(s, lst), sid, t["date"])
     if not sig:
         return 404, {"ok": False, "error": "сигнал не знайдено в signals_log.csv"}
-    chk = journal.check_trade(t, sig)
+    chk = journal.check_trade(t, sig, None, lst["market"] if lst else "crypto")
     fields = {"signal_id": sid, "signal_json": json.dumps(sig, ensure_ascii=False),
               "checks_json": json.dumps(chk["items"], ensure_ascii=False)}
     if body.get("by_screener") in ("так", "ні"):
@@ -1467,9 +1528,12 @@ def journal_delete(body):
     t = JOURNAL.get(n)
     if not t:
         return 404, {"ok": False, "error": f"угоди №{n} немає"}
-    if n != JOURNAL.next_n() - 1:
-        return 400, {"ok": False, "error": "видаляти можна лише останню угоду (щоб номери в додатку й таблиці не розійшлися)"}
-    if load_settings().get("sheet_sync") and (t["sheet_status"] == "ok" or t["sheet_synced_at"]):
+    lst = JOURNAL.get_list(t["list_id"])
+    if lst and lst["status"] != "active":
+        return 400, {"ok": False, "error": list_closed(lst)}
+    if n != JOURNAL.last_n(t["list_id"]):
+        return 400, {"ok": False, "error": "видаляти можна лише останню угоду списку (щоб номери не розійшлися)"}
+    if load_settings().get("sheet_sync") and t["sheet_status"] != "off" and (t["sheet_status"] == "ok" or t["sheet_synced_at"]):
         try:
             with SYNC_LOCK:
                 journal.sheet_call("clearTrade", n=n, instrument=t["instrument"])
@@ -1494,11 +1558,11 @@ def journal_import():
     return 200, res
 
 
-def journal_csv():
+def journal_csv(list_id=None):
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(journal.Journal.CSV_HEAD)
-    for r in JOURNAL.csv_rows():
+    for r in JOURNAL.csv_rows(list_id):
         w.writerow(["" if x is None else x for x in r])
     return ("\ufeff" + buf.getvalue()).encode("utf-8")
 
@@ -1578,9 +1642,14 @@ class Handler(BaseHTTPRequestHandler):
             n = min(2000, max(10, int((q.get("n") or ["300"])[0] or 300)))
             return self._send(200, {"lines": tail(scr.log_path, n), "path": scr.log_path})
         if u.path == "/api/journal":
-            trades = JOURNAL.list()
+            # на порожній базі одразу є «Перший список» (Крипто · Пейпер), щоб журнал не був без списку
+            lst = j_list((q.get("list") or [None])[0]) or JOURNAL.get_list(JOURNAL.sheet_list())
+            trades = JOURNAL.list(lst["id"])
             url, token = journal.sheet_config()
-            return self._send(200, {"trades": trades, "summary": JOURNAL.summary(trades), "next_n": JOURNAL.next_n(),
+            return self._send(200, {"trades": trades, "summary": JOURNAL.summary(trades), "next_n": len(trades) + 1,
+                                    "list": lst, "lists": JOURNAL.lists(),
+                                    "sections": [{"market": m, "mode": md, "label": journal.section_label(m, md)}
+                                                 for m, md in journal.SECTIONS],
                                     "options": {"management": journal.MANAGEMENT, "zone_types": journal.ZONE_TYPES},
                                     "sheet_configured": bool(url and token), "db": JOURNAL.path,
                                     "sheet_sync": bool(s.get("sheet_sync")), "backup_extra_dir": s.get("backup_extra_dir") or "",
@@ -1589,7 +1658,10 @@ class Handler(BaseHTTPRequestHandler):
             period = (q.get("period") or ["all"])[0]
             if period not in ("all", "7", "30", "90", "month"):
                 period = "all"
-            return self._send(200, stats.build(JOURNAL.list(), period))
+            lst = j_list((q.get("list") or [None])[0])
+            res = stats.build(JOURNAL.list(lst["id"]) if lst else [], period)
+            res["list"], res["lists"] = lst, JOURNAL.lists()
+            return self._send(200, res)
         if u.path == "/api/backtest/status":
             return self._send(200, bt_status())
         if u.path == "/api/klines":
@@ -1661,11 +1733,13 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 days = 7.0
             rej = (q.get("rejected") or ["0"])[0] == "1"
-            sigs, path = journal.recent_signals(results_dir(s), days, rej)
+            sigs, path = journal.recent_signals(list_rd(s, j_list((q.get("list") or [None])[0])), days, rej)
             return self._send(200, {"signals": sigs, "path": path, "exists": os.path.exists(path)})
         if u.path == "/api/journal/export.csv":
-            name = f"journal_{dt.date.today().isoformat()}.csv"
-            return self._send(200, journal_csv(), "text/csv; charset=utf-8",
+            lst = j_list((q.get("list") or [None])[0])
+            slug = f"{lst['market']}_{lst['mode']}_{lst['id']}_" if lst else ""   # лише латиниця: заголовок HTTP
+            name = f"journal_{slug}{dt.date.today().isoformat()}.csv"
+            return self._send(200, journal_csv(lst["id"] if lst else None), "text/csv; charset=utf-8",
                               {"Content-Disposition": f'attachment; filename="{name}"'})
         if u.path == "/api/settings":
             return self._send(200, {"settings": s, "defaults": DEFAULTS, "command": display_command(build_command(s)),
@@ -1799,12 +1873,16 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/journal/link":
             code, res = journal_link(s, body)
             return self._send(code, res)
+        if u.path == "/api/journal/lists":
+            code, res = journal_lists(body)
+            return self._send(code, res)
         if u.path == "/api/journal/check":
             t, _ = journal.normalize(body.get("trade") or {})
-            rd = results_dir(s)
+            lst = j_list(body.get("list_id"))
+            rd = list_rd(s, lst)
             sig = journal.find_signal(rd, t["signal_id"], t["date"]) if t["signal_id"] else None
             matches = [] if sig else journal.find_matches(rd, t)
-            return self._send(200, journal.check_trade(t, sig, matches))
+            return self._send(200, journal.check_trade(t, sig, matches, lst["market"] if lst else "crypto"))
         if u.path == "/api/journal/save":
             code, res = journal_save(s, body)
             return self._send(code, res)

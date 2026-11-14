@@ -149,6 +149,25 @@
   </section>
 
   <section id="tab-journal" class="panel">
+    <div class="card j-lists" id="jLists">
+      <div class="chips jsec" id="jSec" role="tablist" aria-label="Розділи журналу"></div>
+      <div class="jl-row" id="jListRow">
+        <label class="jl-lbl">Список <select id="jListSel"></select></label>
+        <span id="jListTag"></span>
+        <span class="jl-acts">
+          <button class="btn small" id="jRename" type="button">Перейменувати</button>
+          <button class="btn small" id="jNewList" type="button">Завершити й почати новий</button>
+          <button class="btn small" id="jFinish" type="button" title="Список піде в архів: угоди лишаться для перегляду">Завершити</button>
+          <button class="btn small primary hidden" id="jUnarchive" type="button">Повернути з архіву</button>
+        </span>
+      </div>
+      <form class="jl-form hidden" id="jListForm" autocomplete="off">
+        <span id="jFormLbl"></span>
+        <input id="jListName" maxlength="60" placeholder="напр. Листопад 2026 або Тест нових фільтрів">
+        <button class="btn small primary" type="submit" id="jListOk">Почати</button>
+        <button class="btn small" type="button" id="jListCancel">Скасувати</button>
+      </form>
+    </div>
     <div class="j-head">
       <div class="j-stats" id="jStats"></div>
       <div class="j-actions">
@@ -196,6 +215,7 @@
   <!-- ======================= ПІДСУМОК ======================= -->
   <section id="tab-summary" class="panel">
     <div class="toolbar">
+      <label class="jl-lbl">Список <select id="sList"></select></label>
       <div class="chips" id="sPeriod">
         <button class="chip on" data-p="all">Усі</button>
         <button class="chip" data-p="90">90 днів</button>
