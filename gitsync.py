@@ -98,11 +98,11 @@ class GitSync:
         if "authentication failed" in e or "invalid username or token" in e or "could not read username" in e \
                 or "terminal prompts disabled" in e or "403" in e:
             return ("GitHub не прийняв вхід (токен прострочений або не збережений). У Терміналі: "
-                    "cd ~/smc_app && git push — логін zbihlei, у полі Password — новий токен ghp_…")
+                    "cd ~/Rulebound && git push — логін zbihlei, у полі Password — новий токен ghp_…")
         if "could not resolve host" in e or "unable to access" in e or "timed out" in e or "не відповів" in e:
             return "немає зв'язку з GitHub — спробую знову, коли з'явиться інтернет"
         if "rejected" in e or "fetch first" in e or "non-fast-forward" in e:
-            return "на GitHub є зміни, яких немає на Mac. У Терміналі: cd ~/smc_app && git pull --rebase && git push"
+            return "на GitHub є зміни, яких немає на Mac. У Терміналі: cd ~/Rulebound && git pull --rebase && git push"
         if "please tell me who you are" in e:
             return "git не знає твого імені. У Терміналі: git config --global user.name \"Michel\" && git config --global user.email \"…\""
         if "not a git repository" in e:

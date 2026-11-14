@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "2.0"
+APP_VERSION = "2.0.1"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -107,6 +107,23 @@ def load_settings():
         pass
     except Exception as e:
         print(f"Увага: не вдалося прочитати {SETTINGS_PATH}: {e}. Беру значення за замовчуванням.")
+    return fix_moved_paths(s)
+
+
+def fix_moved_paths(s):
+    """Папку додатка перейменували чи перенесли (напр. ~/smc_app → ~/Rulebound): шляхи в settings.json ведуть
+    у папку, якої вже немає. Тоді беремо файл/папку з тим самим ім'ям у поточній папці додатка.
+    Якщо стара папка існує — шлях не чіпаємо (це свідомий вибір користувача)."""
+    for k in ("screener_path", "results_dir"):
+        v = str(s.get(k) or "").strip()
+        if not v:
+            continue
+        p = os.path.abspath(os.path.expanduser(v))
+        if os.path.exists(p) or os.path.isdir(os.path.dirname(p)):
+            continue
+        alt = os.path.join(APP_DIR, os.path.basename(p))
+        if os.path.exists(alt):
+            s[k] = alt
     return s
 
 

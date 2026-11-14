@@ -803,7 +803,7 @@ async function loadGit() {
   try { g = await api("/api/git/status"); } catch (e) { return; }
   const el = $("#gitState");
   let h;
-  if (!g.repo) h = `<span class="no">✗</span> Папку ще не підключено до git. У Терміналі: <code>cd ~/smc_app && git init -b main</code>, далі — як у першому пуші.`;
+  if (!g.repo) h = `<span class="no">✗</span> Папку ще не підключено до git. У Терміналі: <code>cd ~/Rulebound && git init -b main</code>, далі — як у першому пуші.`;
   else if (!g.remote) h = `<span class="no">✗</span> Немає адреси репозиторію. У Терміналі: <code>git remote add origin https://github.com/ЛОГІН/smc-app.git</code>`;
   else {
     const link = g.web ? `<a href="${esc(g.web)}" target="_blank" rel="noopener">${esc(g.web.replace("https://github.com/", ""))}</a>` : esc(g.remote);
