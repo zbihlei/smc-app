@@ -60,7 +60,7 @@ def post(path, body):
 try:
     st = json.loads(urllib.request.urlopen(URL + "/api/changelog").read())
     n0 = len(st["entries"])
-    check("перший запуск: історія з changelog.md (69 записів) у data/changelog.json", n0 == 69 and os.path.exists(os.path.join(data, "changelog.json")))
+    check("перший запуск: історія з changelog.md (70 записів) у data/changelog.json", n0 == 70 and os.path.exists(os.path.join(data, "changelog.json")))
     c, r = post("/api/changelog", {"entries": st["entries"] + [{"title": "", "component": "Щось"}], "base_mtime": st["mtime"]})
     check("сервер відхиляє запис без назви й з невідомим компонентом", c == 400 and len(r["errors"]) == 2, r)
     c, r = post("/api/changelog", {"entries": st["entries"][:1], "base_mtime": 1.0})
@@ -75,7 +75,7 @@ try:
         pg.on("dialog", lambda d: d.accept())
         pg.goto(URL)
         pg.click(".tab[data-tab=history]")
-        expect(pg.locator("#hList .t-item")).to_have_count(69)
+        expect(pg.locator("#hList .t-item")).to_have_count(70)
         days = pg.locator("#hList .t-day").all_inner_texts()
         check("хронологія: новіші вгорі, «Дата невідома» внизу, «≈» для приблизних",
               days[0].endswith("листопада 2026") and days[-1] == "Дата невідома" and any(d.startswith("≈") for d in days), days)
@@ -105,7 +105,7 @@ try:
         pg.fill("#hForm input[name=trades]", "21, 22")
         pg.click("#hForm button[type=submit]")
         expect(pg.locator("#hMsg")).to_contain_text("Запис додано")
-        expect(pg.locator("#hList .t-item")).to_have_count(70)
+        expect(pg.locator("#hList .t-item")).to_have_count(71)
         new = pg.locator("#hList .t-item:has-text('бектест етап')")
         check("новий запис: сьогоднішня дата вгорі, жирний текст, угоди №21 №22", new.locator("b").count() >= 2
               and new.locator("[data-trade]").count() == 2)
@@ -117,7 +117,7 @@ try:
         check("редагування: результат з'явився", "Етап пройдено" in pg.locator("#hList .t-item:has-text('бектест етап')").inner_text())
         pg.locator("#hList .t-item:has-text('бектест етап') [data-edit]").click()
         pg.click("#hDelete")
-        expect(pg.locator("#hList .t-item")).to_have_count(69)
+        expect(pg.locator("#hList .t-item")).to_have_count(70)
         hist = os.listdir(os.path.join(data, "changelog_history"))
         check("видалення; кожна попередня версія збережена в changelog_history", len(hist) == 3, hist)
         pg.fill("#hSearch", "<script>")
