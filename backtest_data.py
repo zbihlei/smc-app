@@ -322,6 +322,9 @@ class Downloader:
         if self.thread and self.thread.is_alive():
             return False
         self.stop_flag.clear()
+        # «running» — ще до старту потоку: інакше інтерфейс, який спитає статус у перші мілісекунди,
+        # побачить «idle», не ввімкне автооновлення й залишиться з застарілою картинкою
+        self.state["status"] = "running"
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         return True

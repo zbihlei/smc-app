@@ -40,7 +40,7 @@ import journal
 import tg
 import stats
 
-APP_VERSION = "2.0.1"
+APP_VERSION = "2.0.2"
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(APP_DIR, "static")
 DATA_DIR = os.environ.get("SMC_APP_DATA", os.path.join(APP_DIR, "data"))
@@ -891,9 +891,12 @@ def bt_status():
     months = dl.months if dl else 12
     cache = dl.cache if dl else backtest_data.Cache(DATA_DIR)
     start_ms, end_ms = backtest_data.period(months)
+    # стан — ДО списку монет: якщо завантаження скінчиться між ними, інтерфейс побачить «йде» й оновиться ще раз,
+    # а не «готово» зі старим списком (тоді автооновлення зупиняється на застарілій картинці)
+    prog = dl.progress() if dl else {"status": "idle"}
     summ = cache.summary(start_ms)
     have = [x for x in summ["symbols"] if x["in_list"] and x["1h"] and x["4h"]]
-    return {"progress": dl.progress() if dl else {"status": "idle"}, "cache": summ, "runs": cache.runs(8),
+    return {"progress": prog, "cache": summ, "runs": cache.runs(8),
             "period": {"months": months, "start": start_ms, "end": end_ms,
                        "start_txt": backtest_data.fmt_ms(start_ms), "end_txt": backtest_data.fmt_ms(end_ms)},
             "ready": len(have), "screener_found": os.path.exists(screener_path(s)), "signals": sig_status(),

@@ -109,7 +109,9 @@ check("нормалізація: «dot, HBARUSDT 1000cat dot» → з USDT, бе
       BD.norm_symbols("dot, HBARUSDT 1000cat dot") == ["DOTUSDT", "HBARUSDT", "1000CATUSDT"])
 FB.S.calls.clear()
 dl5 = BD.Downloader(data, SCREENER, months=6, base=BASE, sleep=lambda s: None, add=BD.norm_symbols("tiny, xau, nope"), add_source="з живого логу")
-dl5.start(); wait_done(dl5)
+dl5.start()
+check("одразу після start() статус уже «running» (інтерфейс не зупиняє автооновлення)", dl5.progress()["status"] == "running")
+wait_done(dl5)
 kl5 = {q["symbol"] for pth, q in FB.S.calls if pth == "/fapi/v1/klines"}
 p5 = dl5.progress()
 check("додано TINY (замалий обсяг, але торгується); XAU (метал) і NOPE відхилено з поясненням",

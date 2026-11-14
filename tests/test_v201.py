@@ -38,7 +38,7 @@ s = app.load_settings()
 check("шлях в існуючій папці не змінюється", s["results_dir"] == kept, s["results_dir"])
 check("інший файл скринера в існуючій папці не змінюється", s["screener_path"] == os.path.join(tmp, "інший_скринер.py"))
 
-check("версія 2.0.1", app.APP_VERSION == "2.0.1")
+check("версія не нижче 2.0.1", tuple(int(x) for x in app.APP_VERSION.split(".")) >= (2, 0, 1), app.APP_VERSION)
 src = open(os.path.join(APP, "gitsync.py"), encoding="utf-8").read() + open(os.path.join(APP, "static", "app.js"), encoding="utf-8").read()
 check("підказки git без ~/smc_app", "~/smc_app" not in src and "cd ~/Rulebound" in src)
 
